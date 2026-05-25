@@ -333,7 +333,7 @@ export default function Syncn() {
     setCalLoading(true);
     setCalError(null);
     try {
-      const res = await fetch('/api/sync-calendar');
+      const res = await fetch('/.netlify/functions/sync-calendar');
       if (!res.ok) throw new Error('Sync failed');
       const events = await res.json();
       setGcalEvents(events);
