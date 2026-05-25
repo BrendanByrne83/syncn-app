@@ -342,7 +342,7 @@ export default function Syncn() {
       setCalError("Sync failed. Check your connection or Google auth.");
     }
     setCalLoading(false);
-  }, []););
+  }, []);
 
   useEffect(() => { chatEnd.current?.scrollIntoView({ behavior: "smooth" }); }, [aiMsgs]);
 
