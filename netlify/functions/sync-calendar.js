@@ -12,13 +12,37 @@
 const FAMILY_CAL_ID = "mr6k6unuaegivoamfqbhfdaokh47384i@import.calendar.google.com";
 const PRIMARY_CAL_ID = "brendanlukebyrne@gmail.com";
 
-// Parse local time directly from ISO string — avoids UTC conversion issues
-// e.g. "2026-05-25T10:30:00+10:00" → { hour: 10, min: 30 }
+// Parse local time from ISO string, converting to AEST (UTC+10) when needed.
+// Named offset like +10:00 → read as-is. UTC "Z" suffix → shift +10hrs to AEST.
+const AEST_OFFSET = 10;
+
 function parseLocal(str) {
   if (!str) return null;
+
+  // All-day date only e.g. "2026-05-30"
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+    const [year, month, day] = str.split("-").map(Number);
+    return { year, month, day, hour: 0, min: 0, allDay: true };
+  }
+
   const m = str.match(/(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
   if (!m) return null;
-  return { year: +m[1], month: +m[2], day: +m[3], hour: +m[4], min: +m[5] };
+
+  let year = +m[1], month = +m[2], day = +m[3], hour = +m[4], min = +m[5];
+
+  // Has a named timezone offset like +10:00 or -05:00 — use as local time
+  const hasOffset = /[+-]\d{2}:\d{2}$/.test(str);
+  if (!hasOffset) {
+    // No offset = UTC, shift to AEST +10
+    hour += AEST_OFFSET;
+    if (hour >= 24) {
+      hour -= 24;
+      const d = new Date(year, month - 1, day + 1);
+      year = d.getFullYear(); month = d.getMonth() + 1; day = d.getDate();
+    }
+  }
+
+  return { year, month, day, hour, min };
 }
 
 function gcalToEvent(ev, calType) {
