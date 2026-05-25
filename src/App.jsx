@@ -309,6 +309,69 @@ function renderInline(text) {
   return parts.length ? parts : text;
 }
 
+// ─── DAY PICKER COMPONENT ────────────────────────────────────────────────────
+// Shows actual calendar days (Mon 26, Tue 27 etc) as tappable chips
+function DayPicker({value, onChange, multi=false, label="Day"}) {
+  const today = new Date(); today.setHours(0,0,0,0);
+  const days = Array.from({length:14},(_,i)=>{
+    const d = new Date(today); d.setDate(today.getDate()+i);
+    return {
+      offset: i,
+      label: i===0?"Today":i===1?"Tomorrow":d.toLocaleDateString("en-AU",{weekday:"short",day:"numeric"}),
+      short: d.toLocaleDateString("en-AU",{weekday:"short"}),
+      date: d.toLocaleDateString("en-AU",{day:"numeric"}),
+    };
+  });
+
+  if (multi) {
+    // For recurring — show Mon-Sun as toggleable chips
+    const DAYS = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+    return (
+      <div>
+        <div style={{fontSize:11,color:"#6b7fa3",marginBottom:6}}>{label}</div>
+        <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+          {DAYS.map((d,i)=>{
+            const active = Array.isArray(value) && value.includes(i);
+            return(
+              <button key={i} onClick={()=>{
+                const current = Array.isArray(value)?value:[];
+                onChange(active?current.filter(x=>x!==i):[...current,i].sort());
+              }} style={{
+                padding:"5px 10px",borderRadius:6,border:`1px solid ${active?"#00b4d8":"#1a2540"}`,
+                background:active?"#00b4d818":"transparent",color:active?"#00b4d8":"#6b7fa3",
+                fontSize:11,fontWeight:active?700:400,cursor:"pointer",transition:"all 0.12s"
+              }}>{d}</button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div style={{fontSize:11,color:"#6b7fa3",marginBottom:6}}>{label}</div>
+      <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+        {days.map(d=>{
+          const active = value===d.offset;
+          return(
+            <button key={d.offset} onClick={()=>onChange(d.offset)} style={{
+              padding:"5px 10px",borderRadius:6,border:`1px solid ${active?"#00b4d8":"#1a2540"}`,
+              background:active?"#00b4d818":"transparent",
+              color:active?"#00b4d8":"#6b7fa3",
+              fontSize:11,fontWeight:active?700:400,cursor:"pointer",transition:"all 0.12s",
+              display:"flex",flexDirection:"column",alignItems:"center",gap:1,minWidth:44
+            }}>
+              <span style={{fontSize:9,opacity:0.7}}>{d.short}</span>
+              <span style={{fontWeight:active?800:400}}>{d.date||d.label}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ─── LOGO ─────────────────────────────────────────────────────────────────────
 function Logo({size=24}){
   return(
@@ -418,6 +481,20 @@ export default function Syncn(){
   const [freedSlot,setFreedSlot]=useState(null); // {dateKey, startHour, startMin, duration}
   const [eveningPlanModal,setEveningPlanModal]=useState(false);
   const [eveningPlanLoading,setEveningPlanLoading]=useState(false);
+  const [hiddenEvents,setHiddenEvents]=useState(()=>{
+    try{ return JSON.parse(localStorage.getItem("syncn_hidden_events")||"[]"); }catch{ return []; }
+  });
+  const hideEvent = (id) => {
+    const updated = [...hiddenEvents, id];
+    setHiddenEvents(updated);
+    localStorage.setItem("syncn_hidden_events", JSON.stringify(updated));
+  };
+  const unhideEvent = (id) => {
+    const updated = hiddenEvents.filter(x => x !== id);
+    setHiddenEvents(updated);
+    localStorage.setItem("syncn_hidden_events", JSON.stringify(updated));
+  };
+  const [showHiddenModal,setShowHiddenModal]=useState(false);
   const [calLoading,setCalLoading]=useState(false);
   const [calError,setCalError]=useState(null);
   const [scheduling,setScheduling]=useState(false);
@@ -460,8 +537,10 @@ export default function Syncn(){
   const isEvening = new Date().getHours() >= 20;
   const isMonday = new Date().getDay() === 1;
 
+  // Filter out hidden events (hidden from Sync'n only — stays in Google Calendar)
+  const visibleGcalEvents = gcalEvents.filter(e => !hiddenEvents.includes(e.id));
   const todayTasks=scheduledTasks.filter(t=>t.dayOffset===0);
-  const todayEvents=gcalEvents.filter(e=>e.dayOffset===0);
+  const todayEvents=visibleGcalEvents.filter(e=>e.dayOffset===0);
   const todayRecurring = recurringInstances.filter(r => r.dayOffset === 0);
   const todayAll=[
     ...todayTasks.map(t=>({...t,_type:"task",_color:PILLARS[t.pillar]?.color||C.cyan})),
@@ -501,7 +580,7 @@ export default function Syncn(){
     const window = fullWeek ? 5 : 1;
     const occupied = [
       ...scheduledTasks.map(t=>({dayOffset:t.dayOffset,startHour:t.startHour,startMin:t.startMin,duration:t.duration,title:t.title})),
-      ...gcalEvents.map(e=>({dayOffset:e.dayOffset,startHour:e.startHour,startMin:e.startMin,duration:e.duration,title:e.title})),
+      ...visibleGcalEvents.map(e=>({dayOffset:e.dayOffset,startHour:e.startHour,startMin:e.startMin,duration:e.duration,title:e.title})),
       ...recurringInstances.filter(r=>r.dayOffset>=0&&r.dayOffset<=window).map(r=>({dayOffset:r.dayOffset,startHour:r.startHour,startMin:r.startMin,duration:r.duration,title:r.title})),
     ];
     const toSched = unscheduled.filter(t=>t.priority!=="Low").slice(0,12);
@@ -540,7 +619,7 @@ Check your Calendar view to review. Tap any block to adjust.`}]);
 
 Completed:${JSON.stringify(done.map(t=>t.title))}
 Needs rescheduling:${JSON.stringify(toReschedule.map(t=>({id:t.id,title:t.title,duration:t.duration})))}
-Existing blocks:${JSON.stringify([...gcalEvents.filter(e=>e.dayOffset===0),...recurringInstances.filter(r=>r.dayOffset===0)].map(e=>({startHour:e.startHour,startMin:e.startMin,duration:e.duration})))}`;
+Existing blocks:${JSON.stringify([...visibleGcalEvents.filter(e=>e.dayOffset===0),...recurringInstances.filter(r=>r.dayOffset===0)].map(e=>({startHour:e.startHour,startMin:e.startMin,duration:e.duration})))}`;
     try {
       const reply = await callClaude([{role:"user",content:prompt}],"Scheduling AI. Return only valid JSON.");
       const parsed = JSON.parse(reply.replace(/```json|```/g,"").trim());
@@ -575,7 +654,7 @@ Existing blocks:${JSON.stringify([...gcalEvents.filter(e=>e.dayOffset===0),...re
     setScheduling(true);
     const occupied=[
       ...scheduledTasks.map(t=>({dayOffset:t.dayOffset,startHour:t.startHour,startMin:t.startMin,duration:t.duration})),
-      ...gcalEvents.map(e=>({dayOffset:e.dayOffset,startHour:e.startHour,startMin:e.startMin,duration:e.duration})),
+      ...visibleGcalEvents.map(e=>({dayOffset:e.dayOffset,startHour:e.startHour,startMin:e.startMin,duration:e.duration})),
     ];
     // Energy-aware: prefer high energy hours for high priority tasks
     const energyCtx=Object.entries(energyProfile).map(([h,e])=>`${h}:00=${e}/10`).join(", ");
@@ -746,11 +825,19 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
   const handleAdd=()=>{
     if(!newItem.title?.trim()) return;
     if(addModal==="event"){
-      setGcalEvents(p=>[...p,{id:`manual-${nextId++}`,calType:"work",dayOffset:0,...newItem}]);
+      setGcalEvents(p=>[...p,{id:`manual-${nextId++}`,calType:"work",dayOffset:newItem.dayOffset??0,...newItem}]);
     } else if(addModal==="block"){
       setGcalEvents(p=>[...p,{id:`block-${nextId++}`,calType:"block",title:newItem.title,dayOffset:newItem.dayOffset??0,startHour:newItem.startHour??9,startMin:newItem.startMin??0,duration:newItem.duration??60,location:"",attendees:"",htmlLink:""}]);
     } else {
-      setTasks(p=>[...p,{id:nextId++,done:false,scheduled:false,dayOffset:null,startHour:null,startMin:null,postponeCount:0,blockerSurfaced:false,...newItem}]);
+      const schedNow = newItem._scheduleNow && newItem.dayOffset!=null && newItem.startHour!=null;
+      const {_scheduleNow, ...rest} = newItem;
+      setTasks(p=>[...p,{id:nextId++,done:false,postponeCount:0,blockerSurfaced:false,
+        scheduled:schedNow,
+        dayOffset:schedNow?rest.dayOffset:null,
+        startHour:schedNow?rest.startHour:null,
+        startMin:schedNow?(rest.startMin??0):null,
+        ...rest
+      }]);
     }
     setAddModal(null);
   };
@@ -1170,7 +1257,14 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
                   {dayDates[0].toLocaleDateString("en-AU",{day:"numeric",month:"short"})} — {dayDates[6].toLocaleDateString("en-AU",{day:"numeric",month:"short",year:"numeric"})}
                 </span>
                 <span style={{fontSize:10,color:C.textFaint,marginLeft:4}}>Click any slot to block time</span>
-                <button onClick={()=>{setNewItem({title:"",dayOffset:0,startHour:9,startMin:0,duration:60});setAddModal("event");}} style={{marginLeft:"auto",...btn(`${C.cyan}14`,C.cyan,C.cyanDim),fontSize:10}}>+ Meeting</button>
+                <div style={{marginLeft:"auto",display:"flex",gap:7}}>
+                  {hiddenEvents.length>0&&(
+                    <button onClick={()=>setShowHiddenModal(true)} style={{...btn(`${C.medium}14`,C.medium,C.medium),fontSize:10}}>
+                      👁 Hidden ({hiddenEvents.length})
+                    </button>
+                  )}
+                  <button onClick={()=>{setNewItem({title:"",dayOffset:0,startHour:9,startMin:0,duration:60});setAddModal("event");}} style={{...btn(`${C.cyan}14`,C.cyan,C.cyanDim),fontSize:10}}>+ Meeting</button>
+                </div>
               </div>
 
               {/* Day headers */}
@@ -1205,7 +1299,7 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
                     const dayOff=Math.round((date-today)/(864e5));
                     const colTasks=scheduledTasks.filter(t=>t.dayOffset===dayOff);
                     const colRecurring=recurringInstances.filter(r=>r.dayOffset===dayOff);
-                    const colEvents=gcalEvents.filter(e=>e.dayOffset===dayOff);
+                    const colEvents=visibleGcalEvents.filter(e=>e.dayOffset===dayOff);
                     const allItems=[...colTasks.map(t=>({...t,_isTask:true})),...colEvents.map(e=>({...e,_isTask:false})),...colRecurring.map(r=>({...r,_isTask:true,_isRecurring:true}))];
                     const withOverlap=computeOverlaps(allItems);
 
@@ -1400,9 +1494,19 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
                 </div>
                 {e.attendees&&<div style={{fontSize:11,color:C.textMuted,marginBottom:10}}>👥 {e.attendees}</div>}
                 {e.htmlLink&&<a href={e.htmlLink} target="_blank" rel="noreferrer" style={{fontSize:11,color:C.cyan}}>Open in Google Calendar →</a>}
-                {(e.id?.startsWith("manual-")||e.id?.startsWith("block-"))&&(
-                  <button onClick={()=>{setGcalEvents(p=>p.filter(x=>x.id!==e.id));setSelected(null);}} style={{display:"block",marginTop:10,...btn("none",C.high,C.high)}}>Delete</button>
-                )}
+                <div style={{display:"flex",gap:7,marginTop:12,flexWrap:"wrap"}}>
+                  {!e.id?.startsWith("manual-")&&!e.id?.startsWith("block-")&&(
+                    <button onClick={()=>{hideEvent(e.id);setSelected(null);}} style={{...btn(`${C.medium}14`,C.medium,C.medium),fontSize:11}}>
+                      👁 Hide from Sync'n
+                    </button>
+                  )}
+                  {(e.id?.startsWith("manual-")||e.id?.startsWith("block-"))&&(
+                    <button onClick={()=>{setGcalEvents(p=>p.filter(x=>x.id!==e.id));setSelected(null);}} style={{...btn("none",C.high,C.high),fontSize:11}}>Delete</button>
+                  )}
+                </div>
+                <div style={{fontSize:10,color:C.textFaint,marginTop:6}}>
+                  {!e.id?.startsWith("manual-")&&!e.id?.startsWith("block-")&&"Hiding removes it from your Sync'n view only. It stays in Google Calendar."}
+                </div>
               </>);
             })()}
           </div>
@@ -1446,18 +1550,31 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
                   <label style={{fontSize:11,color:C.textMuted}}>Deadline</label>
                   <input type="date" value={newItem.deadline||""} onChange={e=>setNewItem(n=>({...n,deadline:e.target.value}))} style={{...inp,flex:1}}/>
                 </div>
+                {/* Optional: schedule immediately */}
+                <div style={{borderTop:`1px solid ${C.border}`,paddingTop:10}}>
+                  <label style={{display:"flex",alignItems:"center",gap:8,fontSize:11,color:C.textMuted,cursor:"pointer",marginBottom:newItem._scheduleNow?10:0}}>
+                    <input type="checkbox" checked={!!newItem._scheduleNow} onChange={e=>setNewItem(n=>({...n,_scheduleNow:e.target.checked}))}/>
+                    Schedule this task now (skip AI scheduling)
+                  </label>
+                  {newItem._scheduleNow&&(
+                    <>
+                      <DayPicker value={newItem.dayOffset??0} onChange={v=>setNewItem(n=>({...n,dayOffset:v}))} label="Which day?"/>
+                      <div style={{display:"flex",gap:8,alignItems:"center",marginTop:6}}>
+                        <label style={{fontSize:11,color:C.textMuted,whiteSpace:"nowrap"}}>Time</label>
+                        <input type="time" defaultValue="09:00" onChange={e=>{const[h,m]=e.target.value.split(":").map(Number);setNewItem(n=>({...n,startHour:h,startMin:m}));}} style={{...inp,flex:1}}/>
+                      </div>
+                    </>
+                  )}
+                </div>
                 <textarea value={newItem.notes||""} onChange={e=>setNewItem(n=>({...n,notes:e.target.value}))} placeholder="Notes (optional)" rows={2} style={{...inp,resize:"none"}}/>
               </>)}
               {(addModal==="event"||addModal==="block")&&(<>
-                <div style={{display:"flex",gap:8,alignItems:"center"}}>
-                  <label style={{fontSize:11,color:C.textMuted,whiteSpace:"nowrap"}}>Day (0=today)</label>
-                  <input type="number" value={newItem.dayOffset??0} min={0} max={30} onChange={e=>setNewItem(n=>({...n,dayOffset:parseInt(e.target.value)||0}))} style={{...inp,width:70}}/>
-                  <input type="time" defaultValue={`${String(newItem.startHour??9).padStart(2,"0")}:00`}
-                    onChange={e=>{const[h,m]=e.target.value.split(":").map(Number);setNewItem(n=>({...n,startHour:h,startMin:m}));}}
-                    style={{...inp,flex:1}}/>
-                </div>
-                <div style={{display:"flex",gap:8,alignItems:"center"}}>
-                  <label style={{fontSize:11,color:C.textMuted}}>Duration (min)</label>
+                <DayPicker value={newItem.dayOffset??0} onChange={v=>setNewItem(n=>({...n,dayOffset:v}))} label="Which day?"/>
+                <div style={{display:"flex",gap:8,alignItems:"center",marginTop:4}}>
+                  <label style={{fontSize:11,color:C.textMuted,whiteSpace:"nowrap"}}>Time</label>
+                  <input type="time" defaultValue={`${String(newItem.startHour??9).padStart(2,"0")}:${String(newItem.startMin??0).padStart(2,"0")}`}
+                    onChange={e=>{const[h,m]=e.target.value.split(":").map(Number);setNewItem(n=>({...n,startHour:h,startMin:m}));}} style={{...inp,flex:1}}/>
+                  <label style={{fontSize:11,color:C.textMuted,whiteSpace:"nowrap"}}>Duration (min)</label>
                   <input type="number" value={newItem.duration||60} min={15} step={15} onChange={e=>setNewItem(n=>({...n,duration:parseInt(e.target.value)||60}))} style={{...inp,width:80}}/>
                 </div>
               </>)}
@@ -1558,11 +1675,12 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
                   {["High","Medium","Low"].map(p=><option key={p}>{p}</option>)}
                 </select>
               </div>
-              <div style={{display:"flex",gap:8,alignItems:"center"}}>
-                <label style={{fontSize:11,color:C.textMuted,whiteSpace:"nowrap"}}>Day (0=today)</label>
-                <input type="number" value={editItem.dayOffset??0} min={-7} max={30} onChange={e=>setEditItem(n=>({...n,dayOffset:parseInt(e.target.value)||0}))} style={{...inp,width:70}}/>
+              <DayPicker value={editItem.dayOffset??0} onChange={v=>setEditItem(n=>({...n,dayOffset:v,scheduled:true}))} label="Scheduled day"/>
+              <div style={{display:"flex",gap:8,alignItems:"center",marginTop:4}}>
+                <label style={{fontSize:11,color:C.textMuted,whiteSpace:"nowrap"}}>Time</label>
                 <input type="time" value={editItem.startHour!=null?`${String(editItem.startHour).padStart(2,"0")}:${String(editItem.startMin||0).padStart(2,"0")}`:"09:00"}
                   onChange={e=>{const[h,m]=e.target.value.split(":").map(Number);setEditItem(n=>({...n,startHour:h,startMin:m,scheduled:true}));}} style={{...inp,flex:1}}/>
+                <label style={{fontSize:11,color:C.textMuted,whiteSpace:"nowrap"}}>Duration (min)</label>
                 <input type="number" value={editItem.duration||60} min={15} step={15} onChange={e=>setEditItem(n=>({...n,duration:parseInt(e.target.value)||60}))} style={{...inp,width:70}}/>
               </div>
               <div style={{display:"flex",gap:8,alignItems:"center"}}>
@@ -1781,6 +1899,45 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
                 </div>
               ))}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── HIDDEN EVENTS MANAGER ── */}
+      {showHiddenModal&&(
+        <div onClick={()=>setShowHiddenModal(false)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.65)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center"}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:C.bgCard,borderRadius:16,padding:24,width:500,maxWidth:"92vw",maxHeight:"65vh",overflow:"hidden",display:"flex",flexDirection:"column",boxShadow:`0 24px 60px rgba(0,0,0,0.7),0 0 0 1px ${C.border}`}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+              <h3 style={{margin:0,fontSize:15,fontWeight:800,color:C.text}}>Hidden Events</h3>
+              <button onClick={()=>setShowHiddenModal(false)} style={{background:"none",border:"none",cursor:"pointer",color:C.textFaint,fontSize:20}}>×</button>
+            </div>
+            <div style={{fontSize:11,color:C.textMuted,marginBottom:16}}>
+              These events are hidden from Sync'n but still exist in Google Calendar. Your family can still see them.
+            </div>
+            <div style={{overflowY:"auto",flex:1}}>
+              {hiddenEvents.length===0?(
+                <div style={{fontSize:12,color:C.textFaint,padding:"20px 0",textAlign:"center"}}>No hidden events. Tap "Hide from Sync'n" on any calendar event to hide it.</div>
+              ):gcalEvents.filter(e=>hiddenEvents.includes(e.id)).map(e=>(
+                <div key={e.id} style={{background:C.bgSurface,border:`1px solid ${C.border}`,borderRadius:8,padding:"10px 14px",marginBottom:6,display:"flex",alignItems:"center",gap:10}}>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:12,fontWeight:600,color:C.textMuted,textDecoration:"line-through"}}>{e.title}</div>
+                    <div style={{fontSize:10,color:C.textFaint,marginTop:2}}>
+                      Day+{e.dayOffset} {fmtT(e.startHour,e.startMin)} · {fmtD(e.duration)}
+                      {e.calType==="family"?" · Family Calendar":""}
+                    </div>
+                  </div>
+                  <button onClick={()=>unhideEvent(e.id)} style={{...btn(`${C.done}14`,C.done,C.done),fontSize:10}}>↩ Unhide</button>
+                </div>
+              ))}
+              {hiddenEvents.filter(id=>!gcalEvents.find(e=>e.id===id)).length>0&&(
+                <div style={{marginTop:8,padding:"8px 12px",background:C.bgCard,borderRadius:7,fontSize:10,color:C.textFaint}}>
+                  +{hiddenEvents.filter(id=>!gcalEvents.find(e=>e.id===id)).length} hidden events from previous weeks (auto-cleared after sync)
+                </div>
+              )}
+            </div>
+            {hiddenEvents.length>0&&(
+              <button onClick={()=>{setHiddenEvents([]);localStorage.setItem("syncn_hidden_events","[]");}} style={{marginTop:12,...btn(C.bgSurface,C.high,C.high),fontSize:11,alignSelf:"flex-start"}}>Clear All Hidden</button>
+            )}
           </div>
         </div>
       )}
