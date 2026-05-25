@@ -681,7 +681,7 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
                   <div style={{background:C.bgCard,border:`1px solid ${C.border}`,borderRadius:12,padding:"16px"}}>
                     <div style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",letterSpacing:0.5,marginBottom:12}}>Today's Schedule</div>
                     {todayAll.length===0?(
-                      <div style={{fontSize:12,color:C.textFaint,padding:"10px 0"}}>Nothing scheduled.{unscheduled.length>0?" Hit AI Schedule."":""}</div>
+                      <div style={{fontSize:12,color:C.textFaint,padding:"10px 0"}}>Nothing scheduled.{unscheduled.length>0?" Hit AI Schedule.":""}</div>
                     ):todayAll.slice(0,6).map(item=>(
                       <div key={item.id} style={{display:"flex",gap:8,alignItems:"flex-start",marginBottom:8,paddingBottom:8,borderBottom:`1px solid ${C.borderLight}`}}>
                         <div style={{width:44,flexShrink:0,textAlign:"right"}}>
