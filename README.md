@@ -67,3 +67,15 @@ To test locally: `npm install -g netlify-cli` then `netlify dev`
 
 - **Primary (Work):** brendanlukebyrne@gmail.com — shown in cyan
 - **Byrne Family Calendar:** shown in warm tan
+
+---
+
+## Enable AI Chief-of-Staff + AI Scheduling
+
+In Netlify → **Site → Environment Variables**, add:
+
+| Key | Value |
+|-----|-------|
+| `VITE_ANTHROPIC_KEY` | Your Anthropic API key from console.anthropic.com |
+
+Then redeploy. Both the AI chat and AI Schedule button will work.
