@@ -274,8 +274,7 @@ async function callClaude(messages,system,maxTokens=1000){
 // Simple inline renderer — handles bold, italic, headers, bullets, line breaks
 function renderMarkdown(text) {
   if (!text) return null;
-  const lines = text.split("
-");
+  const lines = text.split("\n");
   return lines.map((line, i) => {
     // Heading
     if (line.startsWith("### ")) return <div key={i} style={{fontSize:13,fontWeight:800,color:"#f0f4ff",marginTop:12,marginBottom:4}}>{renderInline(line.slice(4))}</div>;
