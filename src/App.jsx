@@ -108,6 +108,84 @@ const INIT_GCAL = [
   {id:"fam-8",title:"Psych - Barbara",dayOffset:3,startHour:14,startMin:0,duration:60,calType:"family",attendees:"",location:"",htmlLink:""},
 ];
 
+// ─── RECURRING TASKS ─────────────────────────────────────────────────────────
+// type: "daily" | "weekly" | "weekday" | "monthly"
+// days: array of 0=Mon..6=Sun (for weekly)
+const INIT_RECURRING = [
+  {
+    id:"rec-1", title:"Lunch break", pillar:"health", sub:"Physical",
+    priority:"Medium", duration:60, status:"active", notes:"",
+    recurrence:{ type:"weekday", days:[0,1,2,3,4], startHour:12, startMin:30, endDate:null },
+    exceptions:{},
+  },
+  {
+    id:"rec-2", title:"Madden Footy Training", pillar:"family", sub:"Madden",
+    priority:"Medium", duration:90, status:"active", notes:"",
+    recurrence:{ type:"weekly", days:[1,3], startHour:17, startMin:30, endDate:null },
+    exceptions:{},
+  },
+  {
+    id:"rec-3", title:"Weekly reflection / journal", pillar:"growth", sub:"Reflection",
+    priority:"Medium", duration:30, status:"active", notes:"",
+    recurrence:{ type:"weekly", days:[6], startHour:20, startMin:0, endDate:null },
+    exceptions:{},
+  },
+];
+
+// Generate recurring instances for a given date range (dayOffset window)
+// Returns array of calendar-event-like objects
+function generateRecurringInstances(recurringTasks, windowDays=14) {
+  const instances = [];
+  const today = new Date(); today.setHours(0,0,0,0);
+
+  recurringTasks.forEach(rt => {
+    if (rt.status === "parked") return;
+    const { type, days, startHour, startMin, endDate } = rt.recurrence;
+    const endD = endDate ? new Date(endDate) : null;
+
+    for (let offset = -1; offset <= windowDays; offset++) {
+      const date = new Date(today); date.setDate(today.getDate() + offset);
+      if (endD && date > endD) continue;
+
+      const dow = date.getDay(); // 0=Sun..6=Sat
+      // Convert to Mon-based: Mon=0..Sun=6
+      const monDow = dow === 0 ? 6 : dow - 1;
+
+      let fires = false;
+      if (type === "daily") fires = true;
+      else if (type === "weekday") fires = monDow <= 4;
+      else if (type === "weekly") fires = days.includes(monDow);
+      else if (type === "monthly") fires = date.getDate() === (days[0] || 1);
+
+      if (!fires) continue;
+
+      // Build date key for exceptions
+      const dateKey = date.toISOString().split("T")[0];
+      const exc = rt.exceptions?.[dateKey];
+      if (exc === "skip") continue;
+
+      const overrides = typeof exc === "object" ? exc : {};
+      instances.push({
+        id: `${rt.id}-${dateKey}`,
+        recurringId: rt.id,
+        dateKey,
+        title: rt.title,
+        pillar: rt.pillar,
+        sub: rt.sub,
+        priority: rt.priority,
+        duration: rt.duration,
+        dayOffset: offset,
+        startHour: overrides.startHour ?? startHour,
+        startMin: overrides.startMin ?? startMin,
+        calType: "recurring",
+        isRecurring: true,
+        _isTask: true,
+      });
+    }
+  });
+  return instances;
+}
+
 let nextId = 5000;
 
 // ─── ENERGY DEFAULTS ──────────────────────────────────────────────────────────
@@ -190,6 +268,46 @@ async function callClaude(messages,system,maxTokens=1000){
   const data=await res.json();
   if(data.error) return `Error: ${data.error.message}`;
   return data.content?.[0]?.text||"";
+}
+
+// ─── MARKDOWN RENDERER ───────────────────────────────────────────────────────
+// Simple inline renderer — handles bold, italic, headers, bullets, line breaks
+function renderMarkdown(text) {
+  if (!text) return null;
+  const lines = text.split("
+");
+  return lines.map((line, i) => {
+    // Heading
+    if (line.startsWith("### ")) return <div key={i} style={{fontSize:13,fontWeight:800,color:"#f0f4ff",marginTop:12,marginBottom:4}}>{renderInline(line.slice(4))}</div>;
+    if (line.startsWith("## "))  return <div key={i} style={{fontSize:14,fontWeight:800,color:"#f0f4ff",marginTop:14,marginBottom:4}}>{renderInline(line.slice(3))}</div>;
+    if (line.startsWith("# "))   return <div key={i} style={{fontSize:16,fontWeight:800,color:"#f0f4ff",marginTop:16,marginBottom:6}}>{renderInline(line.slice(2))}</div>;
+    // Bullet
+    if (line.startsWith("- ") || line.startsWith("* ")) return <div key={i} style={{display:"flex",gap:8,marginBottom:4,paddingLeft:4}}><span style={{color:"#00b4d8",flexShrink:0,marginTop:1}}>›</span><span style={{fontSize:13,lineHeight:1.55,color:"#eef2ff"}}>{renderInline(line.slice(2))}</span></div>;
+    if (line.match(/^\d+\. /)) return <div key={i} style={{display:"flex",gap:8,marginBottom:4,paddingLeft:4}}><span style={{color:"#00b4d8",flexShrink:0,minWidth:16,fontSize:11}}>{line.match(/^(\d+)\./)[1]}.</span><span style={{fontSize:13,lineHeight:1.55,color:"#eef2ff"}}>{renderInline(line.replace(/^\d+\. /,""))}</span></div>;
+    // HR
+    if (line.match(/^---+$/)) return <div key={i} style={{height:1,background:"#1a2540",margin:"10px 0"}}/>;
+    // Empty line
+    if (line.trim()==="") return <div key={i} style={{height:6}}/>;
+    // Normal paragraph
+    return <div key={i} style={{fontSize:13,lineHeight:1.6,color:"#eef2ff",marginBottom:2}}>{renderInline(line)}</div>;
+  });
+}
+
+function renderInline(text) {
+  // Bold + italic, bold, italic, code, plain
+  const parts = [];
+  const re = /(\*\*\*(.+?)\*\*\*|\*\*(.+?)\*\*|\*(.+?)\*|`([^`]+)`)/g;
+  let last = 0; let m;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) parts.push(text.slice(last, m.index));
+    if (m[2]) parts.push(<strong key={m.index} style={{fontWeight:800,fontStyle:"italic"}}>{m[2]}</strong>);
+    else if (m[3]) parts.push(<strong key={m.index} style={{fontWeight:800,color:"#38d4f5"}}>{m[3]}</strong>);
+    else if (m[4]) parts.push(<em key={m.index} style={{fontStyle:"italic",color:"#a8c4d8"}}>{m[4]}</em>);
+    else if (m[5]) parts.push(<code key={m.index} style={{background:"#1a2540",color:"#38d4f5",padding:"1px 5px",borderRadius:4,fontSize:11,fontFamily:"monospace"}}>{m[5]}</code>);
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) parts.push(text.slice(last));
+  return parts.length ? parts : text;
 }
 
 // ─── LOGO ─────────────────────────────────────────────────────────────────────
@@ -289,6 +407,18 @@ export default function Syncn(){
   const [compassLoading,setCompassLoading]=useState(false);
   const [memory,setMemory]=useState(loadMemory);
   const [briefingDone,setBriefingDone]=useState(false);
+  const [recurringTasks,setRecurringTasks]=useState(INIT_RECURRING);
+  const [archive,setArchive]=useState([]); // completed tasks older than 7 days
+  const [showArchive,setShowArchive]=useState(false);
+  const [editModal,setEditModal]=useState(null); // {task, mode:'single'|'all'}
+  const [editItem,setEditItem]=useState({});
+  const [recurringEditModal,setRecurringEditModal]=useState(null); // {instance, rt}
+  const [recurringEditMode,setRecurringEditMode]=useState(null); // 'single'|'future'|'all'
+  const [addRecurringModal,setAddRecurringModal]=useState(false);
+  const [newRecurring,setNewRecurring]=useState({title:"",pillar:"family",sub:"",priority:"Medium",duration:60,status:"active",notes:"",recurrence:{type:"weekly",days:[0],startHour:9,startMin:0,endDate:""}});
+  const [freedSlot,setFreedSlot]=useState(null); // {dateKey, startHour, startMin, duration}
+  const [eveningPlanModal,setEveningPlanModal]=useState(false);
+  const [eveningPlanLoading,setEveningPlanLoading]=useState(false);
   const [calLoading,setCalLoading]=useState(false);
   const [calError,setCalError]=useState(null);
   const [scheduling,setScheduling]=useState(false);
@@ -314,11 +444,30 @@ export default function Syncn(){
   const unscheduled=tasks.filter(t=>!t.scheduled&&!t.done&&t.pillar!=="parking"&&t.duration>0&&t.status!=="parked");
   const pColor={High:C.high,Medium:C.medium,Low:C.low};
 
+  // Generate recurring instances for 2-week window
+  const recurringInstances = generateRecurringInstances(recurringTasks, 14);
+
+  // Archive sweep — tasks done > 7 days ago
+  useEffect(() => {
+    const cutoff = Date.now() - 7 * 864e5;
+    const toArchive = tasks.filter(t => t.done && t.doneAt && t.doneAt < cutoff);
+    if (toArchive.length > 0) {
+      setArchive(p => [...p, ...toArchive]);
+      setTasks(p => p.filter(t => !(t.done && t.doneAt && t.doneAt < cutoff)));
+    }
+  }, [tasks]);
+
+  // Evening planning trigger — check if after 8pm
+  const isEvening = new Date().getHours() >= 20;
+  const isMonday = new Date().getDay() === 1;
+
   const todayTasks=scheduledTasks.filter(t=>t.dayOffset===0);
   const todayEvents=gcalEvents.filter(e=>e.dayOffset===0);
+  const todayRecurring = recurringInstances.filter(r => r.dayOffset === 0);
   const todayAll=[
     ...todayTasks.map(t=>({...t,_type:"task",_color:PILLARS[t.pillar]?.color||C.cyan})),
     ...todayEvents.map(e=>({...e,_type:"event",_color:e.calType==="family"?PILLARS.family.color:C.cyan})),
+    ...todayRecurring.map(r=>({...r,_type:"recurring",_color:PILLARS[r.pillar]?.color||C.cyan})),
   ].sort((a,b)=>(a.startHour*60+a.startMin)-(b.startHour*60+b.startMin));
 
   const allSubs=(pid)=>[...(PILLARS[pid]?.sub||[]),...(customSubs[pid]||[])];
@@ -345,6 +494,62 @@ export default function Syncn(){
     if(pid==="parking") return false;
     return pillarPct(pid)<5&&tasks.filter(t=>t.pillar===pid&&!t.done).length>0;
   }).map(([pid,meta])=>({pid,meta}));
+
+  // ── Evening / Next-day Planning ──────────────────────────────────────────────
+  const planNextDay = useCallback(async (fullWeek=false) => {
+    setEveningPlanLoading(true);
+    const tomorrow = fullWeek ? "this week" : "tomorrow";
+    const window = fullWeek ? 5 : 1;
+    const occupied = [
+      ...scheduledTasks.map(t=>({dayOffset:t.dayOffset,startHour:t.startHour,startMin:t.startMin,duration:t.duration,title:t.title})),
+      ...gcalEvents.map(e=>({dayOffset:e.dayOffset,startHour:e.startHour,startMin:e.startMin,duration:e.duration,title:e.title})),
+      ...recurringInstances.filter(r=>r.dayOffset>=0&&r.dayOffset<=window).map(r=>({dayOffset:r.dayOffset,startHour:r.startHour,startMin:r.startMin,duration:r.duration,title:r.title})),
+    ];
+    const toSched = unscheduled.filter(t=>t.priority!=="Low").slice(0,12);
+    const energyCtx = Object.entries(energyProfile).map(([h,e])=>`${h}:00=${e}/10`).join(", ");
+    const prompt = `Plan ${tomorrow} for Beej. Schedule unscheduled tasks into dayOffset ${fullWeek?"0-4":"1"} slots. Work around existing blocks. Respect energy profile. High priority tasks during peak energy. Return ONLY JSON array: [{"id":N,"dayOffset":${fullWeek?"0-4":"1"},"startHour":7-19,"startMin":0}]
+
+Existing blocks:${JSON.stringify(occupied)}
+Energy:${energyCtx}
+Tasks:${JSON.stringify(toSched.map(t=>({id:t.id,title:t.title,priority:t.priority,duration:t.duration,pillar:t.pillar})))}`;
+    try {
+      const reply = await callClaude([{role:"user",content:prompt}], "Scheduling AI. Return only valid JSON. No markdown.");
+      const parsed = JSON.parse(reply.replace(/```json|```/g,"").trim());
+      setTasks(prev=>prev.map(t=>{ const s=parsed.find(x=>x.id===t.id); return s?{...t,scheduled:true,dayOffset:s.dayOffset,startHour:s.startHour,startMin:s.startMin}:t; }));
+      // Tell Compass what was planned
+      const summary = parsed.length > 0
+        ? `AI has scheduled ${parsed.length} tasks for ${tomorrow}. Top items: ${parsed.slice(0,3).map(s=>{const t=unscheduled.find(x=>x.id===s.id); return t?`${t.title} (Day+${s.dayOffset} ${s.startHour}:${String(s.startMin).padStart(2,"0")})`:"";}).filter(Boolean).join(", ")}.`
+        : `No unscheduled high-priority tasks to place for ${tomorrow}.`;
+      setCompassMsgs(p=>[...p,{role:"assistant",content:`**${fullWeek?"Week":"Tomorrow"} planned.** ${summary}
+
+Check your Calendar view to review. Tap any block to adjust.`}]);
+      if(screen!=="compass") setScreen("compass");
+    } catch(e) { console.error(e); }
+    setEveningPlanLoading(false);
+    setEveningPlanModal(false);
+  },[unscheduled, scheduledTasks, gcalEvents, recurringInstances, energyProfile, screen]);
+
+  // Re-sync today — reschedule remaining unfinished tasks around completed ones
+  const resyncToday = useCallback(async () => {
+    const remaining = scheduledTasks.filter(t=>t.dayOffset===0&&!t.done);
+    const done = scheduledTasks.filter(t=>t.dayOffset===0&&t.done);
+    const now = new Date();
+    const currentHour = now.getHours();
+    const toReschedule = remaining.filter(t=>t.startHour<=currentHour);
+    if(toReschedule.length===0){ await sendToCompass("Quick re-sync — look at today and tell me if anything needs adjusting for the rest of the day."); return; }
+    const prompt = `Re-sync today's remaining schedule. These tasks need new slots after ${currentHour}:00. Work around existing events and recurring tasks. Return ONLY JSON: [{"id":N,"dayOffset":0,"startHour":${currentHour+1}-20,"startMin":0}]
+
+Completed:${JSON.stringify(done.map(t=>t.title))}
+Needs rescheduling:${JSON.stringify(toReschedule.map(t=>({id:t.id,title:t.title,duration:t.duration})))}
+Existing blocks:${JSON.stringify([...gcalEvents.filter(e=>e.dayOffset===0),...recurringInstances.filter(r=>r.dayOffset===0)].map(e=>({startHour:e.startHour,startMin:e.startMin,duration:e.duration})))}`;
+    try {
+      const reply = await callClaude([{role:"user",content:prompt}],"Scheduling AI. Return only valid JSON.");
+      const parsed = JSON.parse(reply.replace(/```json|```/g,"").trim());
+      setTasks(prev=>prev.map(t=>{ const s=parsed.find(x=>x.id===t.id); return s?{...t,startHour:s.startHour,startMin:s.startMin}:t; }));
+      setCompassMsgs(p=>[...p,{role:"assistant",content:`**Today re-synced.** Moved ${parsed.length} tasks to new slots. ${toReschedule.length-parsed.length>0?`${toReschedule.length-parsed.length} couldn't fit — consider parking them.`:""}`}]);
+      if(screen!=="compass") setScreen("compass");
+    } catch(e){ console.error(e); }
+  },[scheduledTasks, gcalEvents, recurringInstances, screen]);
 
   // ── Sync Calendar ─────────────────────────────────────────────────────────
   const syncCalendar=useCallback(async()=>{
@@ -489,7 +694,52 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
   };
 
   // ── Task actions ─────────────────────────────────────────────────────────
-  const toggleDone=id=>setTasks(p=>p.map(t=>t.id===id?{...t,done:!t.done}:t));
+  const toggleDone = id => setTasks(p => p.map(t => t.id===id ? {...t, done:!t.done, doneAt:!t.done?Date.now():null} : t));
+
+  const unarchiveTask = id => {
+    const task = archive.find(t => t.id === id);
+    if (!task) return;
+    setArchive(p => p.filter(t => t.id !== id));
+    setTasks(p => [...p, {...task, done:false, doneAt:null}]);
+  };
+
+  // Mark a single recurring instance done (adds exception)
+  const doneRecurringInstance = (recurringId, dateKey) => {
+    setRecurringTasks(p => p.map(rt => rt.id===recurringId
+      ? {...rt, exceptions:{...rt.exceptions, [dateKey]:"skip"}}
+      : rt
+    ));
+  };
+
+  // Skip a recurring instance and optionally suggest a replacement
+  const skipRecurringInstance = (instance) => {
+    doneRecurringInstance(instance.recurringId, instance.dateKey);
+    // Offer freed slot to Compass
+    setFreedSlot({
+      dateKey: instance.dateKey,
+      dayOffset: instance.dayOffset,
+      startHour: instance.startHour,
+      startMin: instance.startMin,
+      duration: instance.duration,
+      title: instance.title,
+    });
+  };
+
+  // Edit a single recurring occurrence
+  const editRecurringOccurrence = (instance, changes) => {
+    setRecurringTasks(p => p.map(rt => rt.id===instance.recurringId
+      ? {...rt, exceptions:{...rt.exceptions, [instance.dateKey]: changes}}
+      : rt
+    ));
+  };
+
+  // Edit all future occurrences
+  const editRecurringFuture = (rt, changes) => {
+    setRecurringTasks(p => p.map(r => r.id===rt.id
+      ? {...r, recurrence:{...r.recurrence, ...changes}}
+      : r
+    ));
+  };
   const deleteTask=id=>{setTasks(p=>p.filter(t=>t.id!==id));setSelected(null);};
   const postponeTask=id=>setTasks(p=>p.map(t=>t.id===id?{...t,postponeCount:(t.postponeCount||0)+1,scheduled:false,dayOffset:null,startHour:null,startMin:null}:t));
   const unscheduleTask=id=>setTasks(p=>p.map(t=>t.id===id?{...t,scheduled:false,dayOffset:null,startHour:null,startMin:null}:t));
@@ -642,8 +892,13 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
                   <h1 style={{margin:0,fontSize:28,fontWeight:800,letterSpacing:-1,color:C.text,lineHeight:1.1}}>
                     Good {new Date().getHours()<12?"morning":new Date().getHours()<17?"afternoon":"evening"}, Brendan.
                   </h1>
-                  <div style={{fontSize:13,color:C.textMuted,marginTop:6}}>
-                    {unscheduled.filter(t=>t.priority==="High").length} urgent tasks unscheduled · {todayAll.length} items today · {gcalEvents.length} calendar events this week
+                  <div style={{fontSize:13,color:C.textMuted,marginTop:6,display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+                    <span>{unscheduled.filter(t=>t.priority==="High").length} urgent · {todayAll.length} today · {gcalEvents.length} calendar events</span>
+                    <div style={{marginLeft:"auto",display:"flex",gap:7}}>
+                      <button onClick={()=>setShowArchive(true)} style={{...btn(C.bgSurface,C.textMuted,C.border),fontSize:10}}>📦 Archive{archive.length>0?` (${archive.length})`:""}</button>
+                      <button onClick={()=>setAddRecurringModal(true)} style={{...btn(C.bgSurface,C.textMuted,C.border),fontSize:10}}>🔁 Recurring</button>
+                      <button onClick={()=>setEveningPlanModal(true)} style={{...btn(`${C.cyan}18`,C.cyan,C.cyanDim),fontSize:10}}>{isMonday?"✦ Plan Week":"✦ Plan Tomorrow"}</button>
+                    </div>
                   </div>
                 </div>
 
@@ -761,7 +1016,11 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
                 <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:20}}>
                   <h2 style={{margin:0,fontSize:20,fontWeight:800,letterSpacing:-0.5}}>{new Date().toLocaleDateString("en-AU",{weekday:"long",day:"numeric",month:"long"})}</h2>
                   <button onClick={checkIn} style={{marginLeft:"auto",...btn(`${C.cyan}18`,C.cyan,C.cyanDim),fontSize:10}}>✦ Check In with Compass</button>
-                  {unscheduled.length>0&&<button onClick={autoSchedule} disabled={scheduling} style={{...btn(`${C.cyan}14`,C.cyan,C.cyanDim),fontSize:10}}>{scheduling?"⟳":"✦ AI Schedule My Day"}</button>}
+                  <div style={{display:"flex",gap:6}}>
+                    <button onClick={resyncToday} style={{...btn(C.bgSurface,C.textMuted,C.border),fontSize:10}}>↻ Re-sync Today</button>
+                    <button onClick={()=>setEveningPlanModal(true)} style={{...btn(`${C.cyan}18`,C.cyan,C.cyanDim),fontSize:10}}>{isEvening||isMonday?isMonday?"✦ Plan Week":"✦ Plan Tomorrow":"✦ Plan Ahead"}</button>
+                    {unscheduled.length>0&&<button onClick={autoSchedule} disabled={scheduling} style={{...btn(`${C.cyan}14`,C.cyan,C.cyanDim),fontSize:10}}>{scheduling?"⟳":"✦ Schedule"}</button>}
+                  </div>
                 </div>
 
                 {/* Hourly timeline */}
@@ -946,8 +1205,9 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
                     const today=new Date(); today.setHours(0,0,0,0);
                     const dayOff=Math.round((date-today)/(864e5));
                     const colTasks=scheduledTasks.filter(t=>t.dayOffset===dayOff);
+                    const colRecurring=recurringInstances.filter(r=>r.dayOffset===dayOff);
                     const colEvents=gcalEvents.filter(e=>e.dayOffset===dayOff);
-                    const allItems=[...colTasks.map(t=>({...t,_isTask:true})),...colEvents.map(e=>({...e,_isTask:false}))];
+                    const allItems=[...colTasks.map(t=>({...t,_isTask:true})),...colEvents.map(e=>({...e,_isTask:false})),...colRecurring.map(r=>({...r,_isTask:true,_isRecurring:true}))];
                     const withOverlap=computeOverlaps(allItems);
 
                     // Energy tint background
@@ -970,10 +1230,17 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
                           const color=item._isTask
                             ?(PILLARS[item.pillar]?.color||C.cyan)
                             :item.calType==="family"?PILLARS.family.color
-                            :item.calType==="block"?"#555":C.cyan;
+                            :item.calType==="block"?"#444":C.cyan;
                           return(
                             <CalBlock key={item.id} item={item} color={color} col={item.col} cols={item.cols} isTask={item._isTask}
-                              onClick={()=>setSelected({type:item._isTask?"task":"event",item})}/>
+                              onClick={()=>{
+                                if(item._isRecurring){
+                                  const rt=recurringTasks.find(r=>r.id===item.recurringId);
+                                  setRecurringEditModal({instance:item,rt});
+                                } else {
+                                  setSelected({type:item._isTask?"task":"event",item});
+                                }
+                              }}/>
                           );
                         })}
                         {isToday&&(()=>{
@@ -1049,8 +1316,8 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
                       background:m.role==="user"?`${C.cyan}18`:C.bgCard,
                       border:`1px solid ${m.role==="user"?C.cyanDim:C.border}`,
                       color:m.role==="user"?C.cyanBright:C.text,
-                      fontSize:13,lineHeight:1.6,whiteSpace:"pre-wrap",
-                    }}>{m.content}</div>
+                      fontSize:13,lineHeight:1.6,
+                    }}>{m.role==="user"?m.content:renderMarkdown(m.content)}</div>
                   </div>
                 ))}
                 {compassLoading&&(
@@ -1107,6 +1374,7 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
                 {t.notes&&<p style={{fontSize:12,color:C.textMuted,margin:"0 0 14px",lineHeight:1.5}}>{t.notes}</p>}
                 <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
                   <button onClick={()=>toggleDone(t.id)} style={{...btn(t.done?C.bgSurface:`${C.done}18`,t.done?C.textMuted:C.done,t.done?C.border:C.done)}}>{t.done?"↩ Undone":"✓ Done"}</button>
+                  <button onClick={()=>{setEditItem({...t});setEditModal(true);}} style={{...btn(C.bgSurface,C.textMuted,C.border)}}>✏ Edit</button>
                   {t.scheduled&&<button onClick={()=>{unscheduleTask(t.id);setSelected(null);}} style={{...btn(`${C.medium}18`,C.medium,C.medium)}}>Unschedule</button>}
                   <button onClick={()=>{postponeTask(t.id);setSelected(null);}} style={{...btn(C.bgSurface,C.textMuted,C.border)}}>↩ Postpone</button>
                   {!t.scheduled&&t.duration>0&&<button onClick={()=>{setSelected(null);autoSchedule();}} style={{...btn(`${C.cyan}18`,C.cyan,C.cyanDim)}}>✦ AI Schedule</button>}
@@ -1272,6 +1540,248 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
               ))}
             </div>
             <button onClick={()=>setBlockerModal(null)} style={{...btn(C.bgSurface,C.textMuted,C.border),fontSize:11}}>Dismiss</button>
+          </div>
+        </div>
+      )}
+
+      {/* ── EDIT TASK MODAL ── */}
+      {editModal&&(
+        <div onClick={()=>setEditModal(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.65)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center"}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:C.bgCard,borderRadius:16,padding:24,width:480,maxWidth:"92vw",boxShadow:`0 24px 60px rgba(0,0,0,0.7),0 0 0 1px ${C.border}`}}>
+            <h3 style={{margin:"0 0 16px",fontSize:15,fontWeight:800,color:C.text}}>Edit Task</h3>
+            <div style={{display:"flex",flexDirection:"column",gap:9}}>
+              <input value={editItem.title||""} onChange={e=>setEditItem(n=>({...n,title:e.target.value}))} style={{...inp,fontSize:13,padding:"10px 12px"}}/>
+              <div style={{display:"flex",gap:8}}>
+                <select value={editItem.pillar||"film"} onChange={e=>setEditItem(n=>({...n,pillar:e.target.value}))} style={{...inp,flex:1}}>
+                  {Object.entries(PILLARS).map(([pid,m])=><option key={pid} value={pid}>{m.icon} {m.label}</option>)}
+                </select>
+                <select value={editItem.priority||"Medium"} onChange={e=>setEditItem(n=>({...n,priority:e.target.value}))} style={{...inp,width:110}}>
+                  {["High","Medium","Low"].map(p=><option key={p}>{p}</option>)}
+                </select>
+              </div>
+              <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                <label style={{fontSize:11,color:C.textMuted,whiteSpace:"nowrap"}}>Day (0=today)</label>
+                <input type="number" value={editItem.dayOffset??0} min={-7} max={30} onChange={e=>setEditItem(n=>({...n,dayOffset:parseInt(e.target.value)||0}))} style={{...inp,width:70}}/>
+                <input type="time" value={editItem.startHour!=null?`${String(editItem.startHour).padStart(2,"0")}:${String(editItem.startMin||0).padStart(2,"0")}`:"09:00"}
+                  onChange={e=>{const[h,m]=e.target.value.split(":").map(Number);setEditItem(n=>({...n,startHour:h,startMin:m,scheduled:true}));}} style={{...inp,flex:1}}/>
+                <input type="number" value={editItem.duration||60} min={15} step={15} onChange={e=>setEditItem(n=>({...n,duration:parseInt(e.target.value)||60}))} style={{...inp,width:70}}/>
+              </div>
+              <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                <label style={{fontSize:11,color:C.textMuted}}>Deadline</label>
+                <input type="date" value={editItem.deadline||""} onChange={e=>setEditItem(n=>({...n,deadline:e.target.value}))} style={{...inp,flex:1}}/>
+                <select value={editItem.status||"active"} onChange={e=>setEditItem(n=>({...n,status:e.target.value}))} style={{...inp,width:130}}>
+                  <option value="active">🔥 Active</option>
+                  <option value="upcoming">🟡 Upcoming</option>
+                  <option value="parked">❄️ Parked</option>
+                </select>
+              </div>
+              <textarea value={editItem.notes||""} onChange={e=>setEditItem(n=>({...n,notes:e.target.value}))} placeholder="Notes…" rows={2} style={{...inp,resize:"none"}}/>
+            </div>
+            <div style={{display:"flex",gap:8,marginTop:16}}>
+              <button onClick={()=>{
+                setTasks(p=>p.map(t=>t.id===editItem.id?{...editItem}:t));
+                setEditModal(null); setSelected(null);
+              }} style={{background:`linear-gradient(135deg,${C.cyan},${C.cyanDim})`,color:C.bg,border:"none",borderRadius:8,padding:"9px 20px",fontSize:12,fontWeight:800,cursor:"pointer"}}>Save</button>
+              <button onClick={()=>setEditModal(null)} style={{...btn(C.bgSurface,C.textMuted,C.border)}}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── RECURRING EDIT MODAL ── */}
+      {recurringEditModal&&!recurringEditMode&&(
+        <div onClick={()=>setRecurringEditModal(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.65)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center"}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:C.bgCard,borderRadius:16,padding:24,width:400,boxShadow:`0 24px 60px rgba(0,0,0,0.7),0 0 0 1px ${C.border}`}}>
+            <div style={{fontSize:11,color:C.cyan,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5,marginBottom:8}}>🔁 Recurring Event</div>
+            <h3 style={{margin:"0 0 6px",fontSize:16,fontWeight:800,color:C.text}}>{recurringEditModal.instance.title}</h3>
+            <div style={{fontSize:12,color:C.textMuted,marginBottom:20}}>
+              {fmtT(recurringEditModal.instance.startHour,recurringEditModal.instance.startMin)} · {fmtD(recurringEditModal.instance.duration)} · {recurringEditModal.instance.dateKey}
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+              <button onClick={()=>setRecurringEditMode("single")} style={{...btn(`${C.cyan}14`,C.cyan,C.cyanDim),textAlign:"left",padding:"10px 14px"}}>
+                <div style={{fontWeight:700,fontSize:12}}>Edit this occurrence only</div>
+                <div style={{fontSize:10,color:C.textMuted,marginTop:2}}>Changes only apply to {recurringEditModal.instance.dateKey}</div>
+              </button>
+              <button onClick={()=>setRecurringEditMode("future")} style={{...btn(C.bgSurface,C.textMuted,C.border),textAlign:"left",padding:"10px 14px"}}>
+                <div style={{fontWeight:700,fontSize:12}}>Edit this and all future occurrences</div>
+                <div style={{fontSize:10,color:C.textMuted,marginTop:2}}>Updates the recurring rule from this date forward</div>
+              </button>
+              <button onClick={()=>{skipRecurringInstance(recurringEditModal.instance);setRecurringEditModal(null);}} style={{...btn(`${C.high}14`,C.high,C.high),textAlign:"left",padding:"10px 14px"}}>
+                <div style={{fontWeight:700,fontSize:12}}>Skip this occurrence</div>
+                <div style={{fontSize:10,color:C.textMuted,marginTop:2}}>Cancel just this one — Compass will suggest what to fill the slot with</div>
+              </button>
+            </div>
+            <button onClick={()=>setRecurringEditModal(null)} style={{marginTop:12,...btn(C.bgSurface,C.textMuted,C.border),fontSize:11}}>Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {/* ── RECURRING OCCURRENCE EDIT ── */}
+      {recurringEditModal&&recurringEditMode&&(
+        <div onClick={()=>setRecurringEditMode(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.65)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center"}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:C.bgCard,borderRadius:16,padding:24,width:420,boxShadow:`0 24px 60px rgba(0,0,0,0.7),0 0 0 1px ${C.border}`}}>
+            <h3 style={{margin:"0 0 16px",fontSize:14,fontWeight:800,color:C.text}}>
+              {recurringEditMode==="single"?"Edit This Occurrence":"Edit All Future Occurrences"}
+            </h3>
+            <div style={{display:"flex",flexDirection:"column",gap:9}}>
+              <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                <label style={{fontSize:11,color:C.textMuted,whiteSpace:"nowrap"}}>Time</label>
+                <input type="time"
+                  defaultValue={`${String(recurringEditModal.instance.startHour).padStart(2,"0")}:${String(recurringEditModal.instance.startMin).padStart(2,"0")}`}
+                  id="recEditTime" style={{...inp,flex:1}}/>
+                <label style={{fontSize:11,color:C.textMuted}}>Duration (min)</label>
+                <input type="number" defaultValue={recurringEditModal.instance.duration} id="recEditDur" min={15} step={15} style={{...inp,width:70}}/>
+              </div>
+            </div>
+            <div style={{display:"flex",gap:8,marginTop:16}}>
+              <button onClick={()=>{
+                const timeEl=document.getElementById("recEditTime");
+                const durEl=document.getElementById("recEditDur");
+                const[h,m]=timeEl.value.split(":").map(Number);
+                const dur=parseInt(durEl.value)||recurringEditModal.instance.duration;
+                if(recurringEditMode==="single"){
+                  editRecurringOccurrence(recurringEditModal.instance,{startHour:h,startMin:m,duration:dur});
+                } else {
+                  editRecurringFuture(recurringEditModal.rt,{startHour:h,startMin:m,duration:dur});
+                }
+                setRecurringEditModal(null); setRecurringEditMode(null);
+              }} style={{background:`linear-gradient(135deg,${C.cyan},${C.cyanDim})`,color:C.bg,border:"none",borderRadius:8,padding:"9px 20px",fontSize:12,fontWeight:800,cursor:"pointer"}}>Save</button>
+              <button onClick={()=>setRecurringEditMode(null)} style={{...btn(C.bgSurface,C.textMuted,C.border)}}>Back</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── ADD RECURRING MODAL ── */}
+      {addRecurringModal&&(
+        <div onClick={()=>setAddRecurringModal(false)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.65)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center"}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:C.bgCard,borderRadius:16,padding:24,width:480,maxWidth:"92vw",boxShadow:`0 24px 60px rgba(0,0,0,0.7),0 0 0 1px ${C.border}`}}>
+            <h3 style={{margin:"0 0 16px",fontSize:15,fontWeight:800,color:C.text}}>New Recurring Task</h3>
+            <div style={{display:"flex",flexDirection:"column",gap:9}}>
+              <input autoFocus value={newRecurring.title} onChange={e=>setNewRecurring(n=>({...n,title:e.target.value}))} placeholder="e.g. Lunch break, Madden training…" style={{...inp,fontSize:13,padding:"10px 12px"}}/>
+              <div style={{display:"flex",gap:8}}>
+                <select value={newRecurring.pillar} onChange={e=>setNewRecurring(n=>({...n,pillar:e.target.value}))} style={{...inp,flex:1}}>
+                  {Object.entries(PILLARS).map(([pid,m])=><option key={pid} value={pid}>{m.icon} {m.label}</option>)}
+                </select>
+                <select value={newRecurring.priority} onChange={e=>setNewRecurring(n=>({...n,priority:e.target.value}))} style={{...inp,width:110}}>
+                  {["High","Medium","Low"].map(p=><option key={p}>{p}</option>)}
+                </select>
+              </div>
+              <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                <label style={{fontSize:11,color:C.textMuted,whiteSpace:"nowrap"}}>Repeats</label>
+                <select value={newRecurring.recurrence.type} onChange={e=>setNewRecurring(n=>({...n,recurrence:{...n.recurrence,type:e.target.value}}))} style={{...inp,flex:1}}>
+                  <option value="daily">Daily</option>
+                  <option value="weekday">Every weekday (Mon–Fri)</option>
+                  <option value="weekly">Weekly (pick days)</option>
+                </select>
+              </div>
+              {newRecurring.recurrence.type==="weekly"&&(
+                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                  {["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map((d,i)=>(
+                    <button key={i} onClick={()=>setNewRecurring(n=>({...n,recurrence:{...n.recurrence,days:n.recurrence.days.includes(i)?n.recurrence.days.filter(x=>x!==i):[...n.recurrence.days,i]}}))}
+                      style={{...btn(newRecurring.recurrence.days.includes(i)?`${C.cyan}22`:"transparent",newRecurring.recurrence.days.includes(i)?C.cyan:C.textMuted,newRecurring.recurrence.days.includes(i)?C.cyanDim:C.border),padding:"4px 10px",fontSize:11}}>{d}</button>
+                  ))}
+                </div>
+              )}
+              <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                <label style={{fontSize:11,color:C.textMuted,whiteSpace:"nowrap"}}>Time</label>
+                <input type="time" defaultValue={`${String(newRecurring.recurrence.startHour).padStart(2,"0")}:${String(newRecurring.recurrence.startMin).padStart(2,"0")}`}
+                  onChange={e=>{const[h,m]=e.target.value.split(":").map(Number);setNewRecurring(n=>({...n,recurrence:{...n.recurrence,startHour:h,startMin:m}}));}} style={{...inp,flex:1}}/>
+                <label style={{fontSize:11,color:C.textMuted}}>Duration (min)</label>
+                <input type="number" value={newRecurring.duration} min={15} step={15} onChange={e=>setNewRecurring(n=>({...n,duration:parseInt(e.target.value)||60}))} style={{...inp,width:70}}/>
+              </div>
+              <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                <label style={{fontSize:11,color:C.textMuted,whiteSpace:"nowrap"}}>End date</label>
+                <input type="date" value={newRecurring.recurrence.endDate||""} onChange={e=>setNewRecurring(n=>({...n,recurrence:{...n.recurrence,endDate:e.target.value||null}}))} style={{...inp,flex:1}}/>
+                <span style={{fontSize:10,color:C.textFaint}}>Leave blank = indefinite</span>
+              </div>
+            </div>
+            <div style={{display:"flex",gap:8,marginTop:16}}>
+              <button onClick={()=>{
+                if(!newRecurring.title.trim()) return;
+                setRecurringTasks(p=>[...p,{...newRecurring,id:`rec-${nextId++}`,exceptions:{}}]);
+                setAddRecurringModal(false);
+                setNewRecurring({title:"",pillar:"family",sub:"",priority:"Medium",duration:60,status:"active",notes:"",recurrence:{type:"weekly",days:[0],startHour:9,startMin:0,endDate:""}});
+              }} style={{background:`linear-gradient(135deg,${C.cyan},${C.cyanDim})`,color:C.bg,border:"none",borderRadius:8,padding:"9px 20px",fontSize:12,fontWeight:800,cursor:"pointer"}}>Add Recurring Task</button>
+              <button onClick={()=>setAddRecurringModal(false)} style={{...btn(C.bgSurface,C.textMuted,C.border)}}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── FREED SLOT SUGGESTION ── */}
+      {freedSlot&&(
+        <div style={{position:"fixed",bottom:24,right:24,zIndex:300,background:C.bgCard,border:`1px solid ${C.cyanDim}`,borderRadius:12,padding:"16px 18px",maxWidth:340,boxShadow:`0 8px 32px rgba(0,180,216,0.15)`}}>
+          <div style={{fontSize:11,color:C.cyan,fontWeight:700,marginBottom:6}}>✦ Freed Slot Detected</div>
+          <div style={{fontSize:12,color:C.text,marginBottom:4}}>
+            <strong>{freedSlot.title}</strong> was skipped — freeing {fmtT(freedSlot.startHour,freedSlot.startMin)} ({fmtD(freedSlot.duration)}).
+          </div>
+          <div style={{fontSize:11,color:C.textMuted,marginBottom:12}}>Want Compass to suggest what to put in this slot?</div>
+          <div style={{display:"flex",gap:7}}>
+            <button onClick={async()=>{
+              setFreedSlot(null);
+              setScreen("compass");
+              await sendToCompass(`A recurring task was skipped, freeing up ${fmtT(freedSlot.startHour,freedSlot.startMin)} for ${fmtD(freedSlot.duration)} on day+${freedSlot.dayOffset}. Based on my unscheduled priorities and energy at that time, what should I put in this slot?`);
+            }} style={{...btn(`${C.cyan}18`,C.cyan,C.cyanDim),fontSize:11}}>✦ Get Suggestion</button>
+            <button onClick={()=>setFreedSlot(null)} style={{...btn(C.bgSurface,C.textMuted,C.border),fontSize:11}}>Dismiss</button>
+          </div>
+        </div>
+      )}
+
+      {/* ── EVENING / WEEK PLAN MODAL ── */}
+      {eveningPlanModal&&(
+        <div onClick={()=>setEveningPlanModal(false)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.65)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center"}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:C.bgCard,borderRadius:16,padding:24,width:400,boxShadow:`0 24px 60px rgba(0,0,0,0.7),0 0 0 1px ${C.border}`}}>
+            <div style={{fontSize:11,color:C.cyan,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5,marginBottom:8}}>✦ AI Planning</div>
+            <h3 style={{margin:"0 0 6px",fontSize:16,fontWeight:800,color:C.text}}>{isMonday?"Plan This Week":"Plan Tomorrow"}</h3>
+            <div style={{fontSize:12,color:C.textMuted,marginBottom:20,lineHeight:1.5}}>
+              {isMonday
+                ?"Compass will schedule your high-priority tasks across the full week, working around your calendar and energy profile."
+                :"Compass will fill tomorrow's schedule with your top unscheduled priorities, working around existing events."
+              }
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+              <button onClick={()=>planNextDay(isMonday)} disabled={eveningPlanLoading}
+                style={{...btn(`${C.cyan}18`,C.cyan,C.cyanDim),padding:"12px 16px",textAlign:"left",fontSize:12}}>
+                {eveningPlanLoading?"⟳ Planning…":isMonday?"✦ Plan Full Week":"✦ Plan Tomorrow"}
+              </button>
+              {!isMonday&&(
+                <button onClick={()=>planNextDay(true)} disabled={eveningPlanLoading}
+                  style={{...btn(C.bgSurface,C.textMuted,C.border),padding:"12px 16px",textAlign:"left",fontSize:12}}>
+                  Plan Full Week Instead
+                </button>
+              )}
+              <button onClick={resyncToday} disabled={eveningPlanLoading}
+                style={{...btn(C.bgSurface,C.textMuted,C.border),padding:"12px 16px",textAlign:"left",fontSize:12}}>
+                ↻ Re-sync Today Only
+              </button>
+            </div>
+            <button onClick={()=>setEveningPlanModal(false)} style={{marginTop:12,...btn(C.bgSurface,C.textMuted,C.border),fontSize:11}}>Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {/* ── ARCHIVE VIEW ── */}
+      {showArchive&&(
+        <div onClick={()=>setShowArchive(false)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.65)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center"}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:C.bgCard,borderRadius:16,padding:24,width:560,maxWidth:"92vw",maxHeight:"70vh",overflow:"hidden",display:"flex",flexDirection:"column",boxShadow:`0 24px 60px rgba(0,0,0,0.7),0 0 0 1px ${C.border}`}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+              <h3 style={{margin:0,fontSize:15,fontWeight:800,color:C.text}}>Archive ({archive.length} tasks)</h3>
+              <button onClick={()=>setShowArchive(false)} style={{background:"none",border:"none",cursor:"pointer",color:C.textFaint,fontSize:20}}>×</button>
+            </div>
+            <div style={{overflowY:"auto",flex:1}}>
+              {archive.length===0?(
+                <div style={{fontSize:12,color:C.textFaint,padding:"20px 0",textAlign:"center"}}>Nothing archived yet. Tasks completed more than 7 days ago appear here.</div>
+              ):archive.map(task=>(
+                <div key={task.id} style={{background:C.bgSurface,border:`1px solid ${C.border}`,borderLeft:`2px solid ${PILLARS[task.pillar]?.color||C.cyan}`,borderRadius:7,padding:"8px 12px",marginBottom:5,display:"flex",alignItems:"center",gap:10,opacity:0.65}}>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:12,fontWeight:500,color:C.text,textDecoration:"line-through"}}>{task.title}</div>
+                    <div style={{fontSize:10,color:C.textMuted,marginTop:2}}>{PILLARS[task.pillar]?.label} · {task.sub} · Done {task.doneAt?new Date(task.doneAt).toLocaleDateString("en-AU"):""}</div>
+                  </div>
+                  <button onClick={()=>unarchiveTask(task.id)} style={{fontSize:10,...btn(C.bgCard,C.cyan,C.cyanDim)}}>↩ Restore</button>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       )}
