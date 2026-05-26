@@ -575,6 +575,7 @@ export default function Syncn(){
   const [todayView,setTodayView]=useState("day"); // day | week
   const [openAccordion,setOpenAccordion]=useState("morning"); // which period is open
   const [overflowOpen,setOverflowOpen]=useState(false);
+  const [scheduleMenuOpen,setScheduleMenuOpen]=useState(false);
   const [pillars,setPillars]=useState(loadPillars);
   const [pillarEditModal,setPillarEditModal]=useState(null); // {id, pillar} | null
   const [subEditModal,setSubEditModal]=useState(null); // {pillarId, subName} | null
@@ -862,43 +863,64 @@ Existing blocks:${JSON.stringify([...visibleGcalEvents.filter(e=>e.dayOffset===0
   // Step 3: Validate every suggestion — reject any that overlap, find next free slot
   // Step 4: Apply only validated, conflict-free placements
 
+  const BUFFER = 15; // minutes buffer between ALL blocks
+
   const buildDayTimeline = useCallback((dayOffset) => {
-    // Returns array of {start, end} in minutes-from-midnight for a given dayOffset
+    // Returns array of {start, end} in minutes-from-midnight, with buffers applied
+    // Calendar events get 15min buffer BEFORE and AFTER (immovable, protected)
+    // Scheduled tasks get 15min buffer AFTER
     const slots = [];
-    const addSlot = (startHour, startMin, duration, buffer=15) => {
-      const start = startHour * 60 + startMin;
-      const end = start + duration + buffer; // include buffer gap
-      slots.push({start, end});
-    };
-    // Calendar events (hard blocks — no buffer needed, they're immovable)
+
+    // Calendar events — HARD blocks, 15min buffer each side
     visibleGcalEvents.filter(e=>e.dayOffset===dayOffset).forEach(e=>{
-      slots.push({start: e.startHour*60+e.startMin, end: e.startHour*60+e.startMin+e.duration});
+      const s = e.startHour*60 + e.startMin;
+      const end = s + e.duration;
+      slots.push({
+        start: s - BUFFER,   // buffer before
+        end: end + BUFFER,   // buffer after
+        label: e.title,
+        hard: true,
+      });
     });
-    // Recurring events
-    recurringInstances.filter(r=>r.dayOffset===dayOffset).forEach(r=>{
-      slots.push({start: r.startHour*60+r.startMin, end: r.startHour*60+r.startMin+r.duration});
+
+    // Recurring events — HARD blocks, 15min buffer each side
+    recurringInstances.filter(r=>r.dayOffset===dayOffset&&!r.isReminder).forEach(r=>{
+      const s = r.startHour*60 + r.startMin;
+      const end = s + r.duration;
+      slots.push({
+        start: s - BUFFER,
+        end: end + BUFFER,
+        label: r.title,
+        hard: true,
+      });
     });
-    // Already-scheduled tasks (with 15min buffer)
+
+    // Already-scheduled tasks — 15min buffer after
     scheduledTasks.filter(t=>t.dayOffset===dayOffset).forEach(t=>{
-      addSlot(t.startHour, t.startMin, t.duration, 15);
+      const s = t.startHour*60 + t.startMin;
+      slots.push({
+        start: s,
+        end: s + t.duration + BUFFER,
+        label: t.title,
+        hard: false,
+      });
     });
+
     return slots.sort((a,b)=>a.start-b.start);
   }, [visibleGcalEvents, recurringInstances, scheduledTasks]);
 
   const findFreeSlot = useCallback((dayOffset, durationMins, preferredStartMins=7*60, endMins=20*60) => {
-    // Find the next available slot on a given day that fits duration + 15min buffer
     const timeline = buildDayTimeline(dayOffset);
-    const needed = durationMins + 15; // task + buffer after
+    const needed = durationMins + BUFFER;
 
-    let cursor = preferredStartMins;
+    let cursor = Math.max(preferredStartMins, 7*60);
     while (cursor + durationMins <= endMins) {
-      const slotStart = cursor;
       const slotEnd = cursor + needed;
-      const conflict = timeline.find(s => slotStart < s.end && slotEnd > s.start);
-      if (!conflict) return cursor; // free — return start in minutes
-      cursor = conflict.end; // jump past the conflict
+      const conflict = timeline.find(s => cursor < s.end && slotEnd > s.start);
+      if (!conflict) return cursor;
+      cursor = conflict.end; // jump past conflict + its buffer
     }
-    return null; // no slot found this day
+    return null;
   }, [buildDayTimeline]);
 
   const autoSchedule = useCallback(async () => {
@@ -993,15 +1015,16 @@ Existing blocks:${JSON.stringify([...visibleGcalEvents.filter(e=>e.dayOffset===0
         // Build timeline including tasks already placed in this scheduling run
         const timeline = buildDayTimeline(dayOffset);
         appliedThisRun.filter(a=>a.dayOffset===dayOffset).forEach(a=>{
-          timeline.push({start:a.startHour*60+a.startMin, end:a.startHour*60+a.startMin+a.duration+15});
+          timeline.push({start:a.startHour*60+a.startMin, end:a.startHour*60+a.startMin+a.duration+BUFFER});
         });
         timeline.sort((a,b)=>a.start-b.start);
 
         // Check if Claude's suggestion is conflict-free
-        const hasConflict = timeline.some(s => suggestedStart < s.end && suggestedEnd+15 > s.start);
+        // Strict check: task must not overlap with any buffered block
+        const hasConflict = timeline.some(s => suggestedStart < s.end && (suggestedEnd + BUFFER) > s.start);
 
-        if (!hasConflict) {
-          // Claude's suggestion is good — use it
+        if (!hasConflict && suggestedStart >= 7*60 && suggestedEnd <= 20*60) {
+          // Claude's suggestion is conflict-free — use it
           validated.push({id, dayOffset, startHour, startMin});
           appliedThisRun.push({dayOffset, startHour, startMin, duration:task.duration});
         } else {
@@ -1020,7 +1043,7 @@ Existing blocks:${JSON.stringify([...visibleGcalEvents.filter(e=>e.dayOffset===0
 
             const timeline2 = buildDayTimeline(d);
             appliedThisRun.filter(a=>a.dayOffset===d).forEach(a=>{
-              timeline2.push({start:a.startHour*60+a.startMin, end:a.startHour*60+a.startMin+a.duration+15});
+              timeline2.push({start:a.startHour*60+a.startMin, end:a.startHour*60+a.startMin+a.duration+BUFFER, hard:false});
             });
             timeline2.sort((a,b)=>a.start-b.start);
 
@@ -1029,7 +1052,7 @@ Existing blocks:${JSON.stringify([...visibleGcalEvents.filter(e=>e.dayOffset===0
             for (const sp of startPoints) {
               if (sp < 7*60 || sp + task.duration > 20*60) continue;
               const end = sp + task.duration;
-              const conflict = timeline2.some(s => sp < s.end && end+15 > s.start);
+              const conflict = timeline2.some(s => sp < s.end && (end+BUFFER) > s.start);
               if (!conflict) {
                 const sh = Math.floor(sp/60);
                 const sm = (sp%60);
@@ -1044,7 +1067,7 @@ Existing blocks:${JSON.stringify([...visibleGcalEvents.filter(e=>e.dayOffset===0
             if (!placed) {
               for (let mins = dayEarliest; mins + task.duration <= 20*60; mins += 15) {
                 const end = mins + task.duration;
-                const conflict = timeline2.some(s => mins < s.end && end+15 > s.start);
+                const conflict = timeline2.some(s => mins < s.end && (end+BUFFER) > s.start);
                 if (!conflict) {
                   validated.push({id, dayOffset:d, startHour:Math.floor(mins/60), startMin:mins%60});
                   appliedThisRun.push({dayOffset:d, startHour:Math.floor(mins/60), startMin:mins%60, duration:task.duration});
@@ -1440,17 +1463,43 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
             </button>
           </div>
 
-          {/* Schedule */}
-          {unscheduled.filter(t=>t.priority!=="Low").length>0&&(
-            <button onClick={autoSchedule} disabled={scheduling} style={{
-              background:scheduling?C.bgSurface:`${C.cyan}15`,color:scheduling?C.textMuted:C.cyan,
-              border:`1px solid ${scheduling?C.border:C.cyanDim}`,borderRadius:8,
-              padding:"5px 14px",fontSize:11,fontWeight:700,cursor:"pointer",
-              display:"flex",alignItems:"center",gap:5,
-            }}>
-              {scheduling?"Scheduling…":"✨ Schedule"}
+          {/* ✨ Schedule button — always visible, dropdown with options */}
+          <div style={{position:"relative"}}>
+            <button onClick={()=>setScheduleMenuOpen(o=>!o)}
+              style={{
+                background:`${C.cyan}15`,color:C.cyan,
+                border:`1px solid ${C.cyanDim}`,borderRadius:8,
+                padding:"5px 14px",fontSize:11,fontWeight:700,cursor:"pointer",
+                display:"flex",alignItems:"center",gap:6,
+              }}>
+              <span>✨</span>
+              <span>{scheduling?"Scheduling…":"Schedule"}</span>
+              <span style={{fontSize:8,opacity:0.7}}>▼</span>
             </button>
-          )}
+            {scheduleMenuOpen&&(
+              <div onClick={()=>setScheduleMenuOpen(false)} style={{position:"fixed",inset:0,zIndex:40}}/>
+            )}
+            {scheduleMenuOpen&&(
+              <div style={{position:"absolute",right:0,top:"calc(100% + 6px)",background:C.bgCard,border:`1px solid ${C.border}`,borderRadius:10,padding:"6px",minWidth:220,zIndex:50,boxShadow:"0 8px 24px rgba(0,0,0,0.3)"}}>
+                {[
+                  {label:"✨ Schedule Remaining Today", sub:"Only fills time slots from now onwards", action:autoSchedule, disabled:scheduling||unscheduled.filter(t=>t.priority!=="Low").length===0},
+                  {label:"↻ Re-sync Today", sub:"Reschedule unfinished tasks around completed ones", action:()=>{resyncToday();setScheduleMenuOpen(false);}},
+                  {label:"📅 Plan Tomorrow", sub:"Fill tomorrow's schedule with top priorities", action:()=>{setEveningPlanModal(true);setScheduleMenuOpen(false);}},
+                  {label:"📆 Plan the Week", sub:"Schedule priorities across the next 7 days", action:()=>{planNextDay(true);setScheduleMenuOpen(false);}},
+                ].map(item=>(
+                  <button key={item.label} onClick={item.disabled?undefined:item.action}
+                    disabled={item.disabled}
+                    style={{display:"block",width:"100%",textAlign:"left",padding:"9px 12px",background:"none",border:"none",cursor:item.disabled?"not-allowed":"pointer",borderRadius:6,opacity:item.disabled?0.4:1}}
+                    onMouseEnter={e=>{if(!item.disabled)e.currentTarget.style.background=C.bgSurface;}}
+                    onMouseLeave={e=>e.currentTarget.style.background="none"}
+                  >
+                    <div style={{fontSize:12,fontWeight:600,color:C.text}}>{item.label}</div>
+                    <div style={{fontSize:10,color:C.textMuted,marginTop:2}}>{item.sub}</div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
 
           {/* Add */}
           <button onClick={()=>{setAddType("task");setNewItem({pillar:"film",sub:"",title:"",priority:"High",duration:60,status:"active",notes:"",deadline:"",_recurring:"never",_scheduleNow:false});setAddModal(true);}}
