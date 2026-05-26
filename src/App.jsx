@@ -948,33 +948,27 @@ Existing blocks:${JSON.stringify([...visibleGcalEvents.filter(e=>e.dayOffset===0
         evening: energyRhythm?.evening?.level||"low",
       };
 
-      const prompt = `You are scheduling tasks for Brendan Byrne. Be EXTREMELY careful not to overlap with existing blocks.
-
-CALENDAR (all existing blocks — DO NOT place tasks during these times):
-${calSummary.join("
-")}
-
-ENERGY PROFILE:
-- Morning (7-11am): ${energyMap.morning} energy → best for creative/deep work
-- Midday (11am-1pm): ${energyMap.midday} energy → best for important meetings/strategy
-- Afternoon (1-5pm): ${energyMap.afternoon} energy → good for focused tasks
-- Evening (5-8pm): ${energyMap.evening} energy → admin, light tasks only
-
-TASKS TO SCHEDULE (in priority order):
-${toSched.map((t,i)=>`${i+1}. id=${t.id} "${t.title}" [${t.pillar}] ${t.priority} priority, ${t.duration}min`).join("
-")}
-
-STRICT RULES:
-1. DO NOT place any task during an existing calendar/recurring/task block
-2. Leave minimum 15 minutes between tasks
-3. Work hours only: 7am (hour=7) to 8pm (hour=20)
-4. Match energy — High priority tasks go in HIGH or PEAK energy periods
-5. Spread across multiple days — max 4 hours of tasks per day
-6. If a day is too packed, move to the next day
-7. Return startMin as 0, 15, 30, or 45 only
-
-Return ONLY a JSON array, no markdown:
-[{"id":N,"dayOffset":0-6,"startHour":7-19,"startMin":0|15|30|45}]`;
+      const calBlock = calSummary.join("\n");
+      const taskList = toSched.map((t,i)=>(i+1)+". id="+t.id+' "'+t.title+'" ['+t.pillar+"] "+t.priority+" priority, "+t.duration+"min").join("\n");
+      const prompt = "You are scheduling tasks for Brendan Byrne. Be EXTREMELY careful not to overlap with existing blocks.\n\n"
+        + "CALENDAR (all existing blocks — DO NOT place tasks during these times):\n"
+        + calBlock + "\n\n"
+        + "ENERGY PROFILE:\n"
+        + "- Morning (7-11am): " + energyMap.morning + " energy → best for creative/deep work\n"
+        + "- Midday (11am-1pm): " + energyMap.midday + " energy → best for important meetings/strategy\n"
+        + "- Afternoon (1-5pm): " + energyMap.afternoon + " energy → good for focused tasks\n"
+        + "- Evening (5-8pm): " + energyMap.evening + " energy → admin, light tasks only\n\n"
+        + "TASKS TO SCHEDULE (in priority order):\n"
+        + taskList + "\n\n"
+        + "STRICT RULES:\n"
+        + "1. DO NOT place any task during an existing calendar/recurring/task block\n"
+        + "2. Leave minimum 15 minutes between tasks\n"
+        + "3. Work hours only: 7am (hour=7) to 8pm (hour=20)\n"
+        + "4. Match energy — High priority tasks go in HIGH or PEAK energy periods\n"
+        + "5. Spread across multiple days — max 4 hours of tasks per day\n"
+        + "6. If a day is too packed, move to the next day\n"
+        + "7. Return startMin as 0, 15, 30, or 45 only\n\n"
+        + 'Return ONLY a JSON array, no markdown:\n[{"id":N,"dayOffset":0-6,"startHour":7-19,"startMin":0|15|30|45}]';
 
       const reply = await callClaude(
         [{role:"user",content:prompt}],
