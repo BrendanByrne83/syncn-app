@@ -682,12 +682,20 @@ Existing blocks:${JSON.stringify([...visibleGcalEvents.filter(e=>e.dayOffset===0
   const syncCalendar=useCallback(async()=>{
     setCalLoading(true); setCalError(null);
     try{
-      const res=await fetch("/.netlify/functions/sync-calendar");
+      const res=await fetch("/.netlify/functions/sync-calendar?range=month");
       if(!res.ok) throw new Error("Sync failed");
       const raw=await res.json();
-      const weekMon=getWeekStart(0);
       const today=new Date(); today.setHours(0,0,0,0);
+      const weekMon=getWeekStart(0);
       const events=raw.map(e=>{
+        // Use rawStart date if available for accurate day offset
+        if(e.rawStart){
+          const parts=e.rawStart.match(/([0-9]{4})-([0-9]{2})-([0-9]{2})/);
+          if(parts){
+            const evDate=new Date(+parts[1],+parts[2]-1,+parts[3]);
+            return {...e,dayOffset:Math.round((evDate-today)/(864e5))};
+          }
+        }
         const ed=new Date(weekMon); ed.setDate(weekMon.getDate()+(e.dayIdx||0));
         return {...e,dayOffset:Math.round((ed-today)/(864e5))};
       });
@@ -873,7 +881,26 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
 
   const handleAdd=()=>{
     if(!newItem.title?.trim()) return;
-    if(addType==="meeting"){
+    if(addType==="recurring"){
+      setRecurringTasks(p=>[...p,{
+        id:`rec-${nextId++}`,
+        title:newItem.title,
+        pillar:newItem.pillar||"film",
+        sub:newItem.sub||"",
+        priority:newItem.priority||"Medium",
+        duration:newItem.duration||60,
+        status:"active",
+        notes:newItem.notes||"",
+        recurrence:{
+          type:newItem._recurring||"weekly",
+          days:newItem._recurDays||[],
+          startHour:newItem.startHour||9,
+          startMin:newItem.startMin||0,
+          endDate:newItem._endDate||null,
+        },
+        exceptions:{},
+      }]);
+    } else if(addType==="meeting"){
       setGcalEvents(p=>[...p,{id:`manual-${nextId++}`,calType:"work",dayOffset:newItem.dayOffset??0,startHour:newItem.startHour??9,startMin:newItem.startMin??0,duration:newItem.duration??60,location:newItem.location||"",attendees:newItem.attendees||"",htmlLink:"",title:newItem.title}]);
       // Handle meeting recurrence
       if(newItem._recurring&&newItem._recurring!=="never"){
@@ -1114,7 +1141,6 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
                     <span>{unscheduled.filter(t=>t.priority==="High").length} urgent · {todayAll.length} today · {gcalEvents.length} calendar events</span>
                     <div style={{marginLeft:"auto",display:"flex",gap:7}}>
                       <button onClick={()=>setShowArchive(true)} style={{...btn(C.bgSurface,C.textMuted,C.border),fontSize:10}}>📦 Archive{archive.length>0?` (${archive.length})`:""}</button>
-                      <button onClick={()=>setAddRecurringModal(true)} style={{...btn(C.bgSurface,C.textMuted,C.border),fontSize:10}}>🔁 Recurring</button>
                       <button onClick={()=>setEveningPlanModal(true)} style={{...btn(`${C.cyan}18`,C.cyan,C.cyanDim),fontSize:10}}>{isMonday?"✦ Plan Week":"✦ Plan Tomorrow"}</button>
                     </div>
                   </div>
@@ -1148,52 +1174,57 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
                   ))}
                 </div>
 
-                {/* Two columns: Today + Urgent */}
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:24}}>
-                  {/* Today */}
-                  <div style={{background:C.bgCard,border:`1px solid ${C.border}`,borderRadius:12,padding:"16px"}}>
-                    <div style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",letterSpacing:0.5,marginBottom:12}}>Today's Schedule</div>
-                    {todayAll.length===0?(
-                      <div style={{fontSize:12,color:C.textFaint,padding:"10px 0"}}>Nothing scheduled.{unscheduled.length>0?" Hit AI Schedule.":""}</div>
-                    ):todayAll.slice(0,6).map(item=>(
-                      <div key={item.id} style={{display:"flex",gap:8,alignItems:"flex-start",marginBottom:8,paddingBottom:8,borderBottom:`1px solid ${C.borderLight}`}}>
-                        <div style={{width:44,flexShrink:0,textAlign:"right"}}>
-                          <span style={{fontSize:9,color:C.textFaint}}>{fmtT(item.startHour,item.startMin)}</span>
-                        </div>
-                        <div style={{flex:1}}>
-                          <div style={{fontSize:11,fontWeight:600,color:C.text,lineHeight:1.3}}>{item.title}</div>
-                          <div style={{fontSize:9,color:item._color,marginTop:1}}>{fmtD(item.duration)}{item._type==="task"?` · ${PILLARS[item.pillar]?.label}`:" · Meeting"}</div>
-                        </div>
-                        <div style={{width:6,height:6,borderRadius:"50%",background:item._color,marginTop:3,flexShrink:0}}/>
+                {/* TODAY'S SCHEDULE — split Morning / Afternoon / Evening */}
+                {(()=>{
+                  const periods=[
+                    {label:"Morning",icon:"🌅",from:0,to:12,color:"#e8a87c"},
+                    {label:"Afternoon",icon:"☀️",from:12,to:17,color:C.cyan},
+                    {label:"Evening",icon:"🌙",from:17,to:24,color:"#9b6dce"},
+                  ];
+                  const hasAny=todayAll.length>0;
+                  return(
+                    <div style={{marginBottom:24}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                        <div style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",letterSpacing:0.5}}>Today's Schedule</div>
+                        <button onClick={()=>setScreen("today")} style={{fontSize:10,color:C.cyan,background:"none",border:"none",cursor:"pointer",fontWeight:600}}>Full view →</button>
                       </div>
-                    ))}
-                    {todayAll.length>6&&<div style={{fontSize:10,color:C.textMuted,marginTop:4}}>+{todayAll.length-6} more → Today view</div>}
-                  </div>
-
-                  {/* Urgent queue */}
-                  <div style={{background:C.bgCard,border:`1px solid ${C.border}`,borderRadius:12,padding:"16px"}}>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-                      <div style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",letterSpacing:0.5}}>Urgent Queue</div>
-                      {unscheduled.filter(t=>t.priority==="High").length>0&&(
-                        <button onClick={autoSchedule} disabled={scheduling} style={{fontSize:9,background:`${C.cyan}18`,color:C.cyan,border:`1px solid ${C.cyanDim}`,borderRadius:5,padding:"2px 8px",cursor:"pointer",fontWeight:700}}>
-                          {scheduling?"⟳":"✦ Schedule All"}
-                        </button>
+                      {!hasAny?(
+                        <div style={{background:C.bgCard,border:`1px solid ${C.border}`,borderRadius:10,padding:"20px",textAlign:"center",color:C.textFaint,fontSize:12}}>
+                          Nothing scheduled today.{unscheduled.length>0?" Hit AI Schedule to fill your day.":""}
+                        </div>
+                      ):(
+                        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12}}>
+                          {periods.map(period=>{
+                            const items=todayAll.filter(i=>i.startHour>=period.from&&i.startHour<period.to);
+                            return(
+                              <div key={period.label} style={{background:C.bgCard,border:`1px solid ${C.border}`,borderRadius:11,padding:"12px 14px",borderTop:`2px solid ${period.color}`}}>
+                                <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:10}}>
+                                  <span style={{fontSize:13}}>{period.icon}</span>
+                                  <span style={{fontSize:11,fontWeight:700,color:period.color}}>{period.label}</span>
+                                  {items.length>0&&<span style={{fontSize:9,background:`${period.color}18`,color:period.color,padding:"1px 6px",borderRadius:8,fontWeight:700,marginLeft:"auto"}}>{items.length}</span>}
+                                </div>
+                                {items.length===0?(
+                                  <div style={{fontSize:10,color:C.textFaint,fontStyle:"italic"}}>Clear</div>
+                                ):items.map(item=>(
+                                  <div key={item.id} onClick={()=>setSelected({type:item._type==="task"?"task":"event",item})}
+                                    style={{display:"flex",gap:6,alignItems:"flex-start",marginBottom:7,paddingBottom:7,borderBottom:`1px solid ${C.borderLight}`,cursor:"pointer"}}
+                                    onMouseEnter={e=>e.currentTarget.style.opacity="0.75"}
+                                    onMouseLeave={e=>e.currentTarget.style.opacity="1"}>
+                                    <div style={{width:6,height:6,borderRadius:"50%",background:item._color,marginTop:3,flexShrink:0}}/>
+                                    <div style={{flex:1,minWidth:0}}>
+                                      <div style={{fontSize:11,fontWeight:600,color:C.text,lineHeight:1.3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.title}</div>
+                                      <div style={{fontSize:9,color:C.textMuted,marginTop:1}}>{fmtT(item.startHour,item.startMin)}{item.duration?` · ${fmtD(item.duration)}`:""}</div>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            );
+                          })}
+                        </div>
                       )}
                     </div>
-                    {unscheduled.filter(t=>t.priority==="High").slice(0,6).map(task=>(
-                      <div key={task.id} onClick={()=>setSelected({type:"task",item:task})} style={{display:"flex",gap:8,alignItems:"center",marginBottom:6,padding:"6px 8px",background:C.bgSurface,borderRadius:6,cursor:"pointer",borderLeft:`2px solid ${PILLARS[task.pillar]?.color||C.cyan}`}}>
-                        <div style={{flex:1}}>
-                          <div style={{fontSize:11,fontWeight:600,color:C.text,lineHeight:1.2}}>{task.title}</div>
-                          <div style={{fontSize:9,color:C.textMuted,marginTop:1}}>{PILLARS[task.pillar]?.label} · {fmtD(task.duration)}</div>
-                        </div>
-                        {task.postponeCount>0&&<span style={{fontSize:8,color:C.high}}>↩{task.postponeCount}</span>}
-                      </div>
-                    ))}
-                    {unscheduled.filter(t=>t.priority==="High").length===0&&(
-                      <div style={{fontSize:12,color:C.textFaint,padding:"10px 0"}}>No urgent unscheduled tasks. Rare. Enjoy it.</div>
-                    )}
-                  </div>
-                </div>
+                  );
+                })()}
 
                 {/* Life balance strip */}
                 <div style={{background:C.bgCard,border:`1px solid ${C.border}`,borderRadius:12,padding:"16px"}}>
@@ -1675,7 +1706,7 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
 
             {/* Type selector */}
             <div style={{display:"flex",gap:4,marginBottom:20,background:C.bg,borderRadius:10,padding:3}}>
-              {[["task","Task","📋"],["meeting","Meeting","📅"],["reminder","Reminder","🔔"]].map(([t,l,ic])=>(
+              {[["task","Task","📋"],["meeting","Meeting","📅"],["reminder","Reminder","🔔"],["recurring","Recurring","🔁"]].map(([t,l,ic])=>(
                 <button key={t} onClick={()=>{
                   setAddType(t);
                   setNewItem(prev=>({
@@ -1813,9 +1844,46 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
               </div>
             )}
 
+            {/* RECURRING */}
+            {addType==="recurring"&&(
+              <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                <div style={{display:"flex",gap:8}}>
+                  <select value={newItem.pillar||"film"} onChange={e=>setNewItem(n=>({...n,pillar:e.target.value,sub:""}))} style={{...inp,flex:1}}>
+                    {Object.entries(PILLARS).filter(([pid])=>pid!=="parking").map(([pid,m])=><option key={pid} value={pid}>{m.icon} {m.label}</option>)}
+                  </select>
+                  <select value={newItem.priority||"Medium"} onChange={e=>setNewItem(n=>({...n,priority:e.target.value}))} style={{...inp,width:110}}>
+                    {["High","Medium","Low"].map(p=><option key={p}>{p}</option>)}
+                  </select>
+                </div>
+                <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                  <label style={{fontSize:11,color:C.textMuted,whiteSpace:"nowrap"}}>Duration (min)</label>
+                  <input type="number" value={newItem.duration||60} min={15} step={15} onChange={e=>setNewItem(n=>({...n,duration:parseInt(e.target.value)||60}))} style={{...inp,width:75}}/>
+                </div>
+                <div>
+                  <div style={{fontSize:11,color:C.textMuted,marginBottom:7}}>Frequency</div>
+                  <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:10}}>
+                    {[["daily","Daily"],["weekday","Weekdays"],["weekly","Weekly"],["weekend","Weekends"]].map(([v,l])=>(
+                      <button key={v} type="button" onClick={()=>setNewItem(n=>({...n,_recurring:v}))} style={{padding:"5px 12px",borderRadius:6,border:`1.5px solid ${(newItem._recurring||"weekly")===v?C.cyan:C.border}`,background:(newItem._recurring||"weekly")===v?`${C.cyan}18`:"transparent",color:(newItem._recurring||"weekly")===v?C.cyan:C.textMuted,fontSize:11,fontWeight:700,cursor:"pointer"}}>{l}</button>
+                    ))}
+                  </div>
+                  {(newItem._recurring==="weekly"||!newItem._recurring)&&(
+                    <DayPicker value={newItem._recurDays||[]} onChange={v=>setNewItem(n=>({...n,_recurDays:v}))} multi label="Repeat on days"/>
+                  )}
+                </div>
+                <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                  <label style={{fontSize:11,color:C.textMuted,whiteSpace:"nowrap"}}>Time</label>
+                  <input type="time" defaultValue="09:00" onChange={e=>{const[h,m]=e.target.value.split(":").map(Number);setNewItem(n=>({...n,startHour:h,startMin:m}));}} style={{...inp,flex:1}}/>
+                  <label style={{fontSize:11,color:C.textMuted,whiteSpace:"nowrap"}}>Ends</label>
+                  <input type="date" value={newItem._endDate||""} onChange={e=>setNewItem(n=>({...n,_endDate:e.target.value||null}))} style={{...inp,flex:1}}/>
+                </div>
+                <div style={{fontSize:10,color:C.textFaint}}>Leave end date blank for indefinite.</div>
+                <textarea value={newItem.notes||""} onChange={e=>setNewItem(n=>({...n,notes:e.target.value}))} placeholder="Notes (optional)" rows={2} style={{...inp,resize:"none"}}/>
+              </div>
+            )}
+
             <div style={{display:"flex",gap:8,marginTop:18,paddingTop:14,borderTop:`1px solid ${C.border}`}}>
               <button onClick={handleAdd} style={{background:`linear-gradient(135deg,${C.cyan},${C.cyanDim})`,color:C.bg,border:"none",borderRadius:8,padding:"9px 24px",fontSize:13,fontWeight:800,cursor:"pointer"}}>
-                {addType==="task"?"Add Task":addType==="meeting"?"Add Meeting":"Set Reminder"}
+                {addType==="task"?"Add Task":addType==="meeting"?"Add Meeting":addType==="recurring"?"Add Recurring":"Set Reminder"}
               </button>
               <button onClick={()=>{setAddModal(false);setNewItem({});}} style={{...btn(C.bgSurface,C.textMuted,C.border)}}>Cancel</button>
             </div>
@@ -1985,7 +2053,19 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
                 <div style={{fontSize:10,color:C.textMuted,marginTop:2}}>Cancel just this one — Compass will suggest what to fill the slot with</div>
               </button>
             </div>
-            <button onClick={()=>setRecurringEditModal(null)} style={{marginTop:12,...btn(C.bgSurface,C.textMuted,C.border),fontSize:11}}>Cancel</button>
+            <div style={{marginTop:12,paddingTop:12,borderTop:`1px solid ${C.border}`,display:"flex",gap:7}}>
+              <button onClick={()=>{
+                // Delete this single occurrence
+                skipRecurringInstance(recurringEditModal.instance);
+                setRecurringEditModal(null);
+              }} style={{...btn(`${C.high}14`,C.high,C.high),fontSize:11}}>🗑 Delete This Occurrence</button>
+              <button onClick={()=>{
+                // Delete the entire recurring series
+                setRecurringTasks(p=>p.filter(r=>r.id!==recurringEditModal.instance.recurringId));
+                setRecurringEditModal(null);
+              }} style={{...btn("none",C.high,C.high),fontSize:11}}>🗑 Delete Entire Series</button>
+              <button onClick={()=>setRecurringEditModal(null)} style={{...btn(C.bgSurface,C.textMuted,C.border),fontSize:11,marginLeft:"auto"}}>Cancel</button>
+            </div>
           </div>
         </div>
       )}
