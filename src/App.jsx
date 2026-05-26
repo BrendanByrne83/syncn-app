@@ -133,17 +133,8 @@ const INIT_TASKS = [
 ];
 
 // ─── CALENDAR EVENTS (synced) ─────────────────────────────────────────────────
-const INIT_GCAL = [
-  {id:"gcal-1",title:"Old Mate - Brendan & Mitch",dayOffset:0,startHour:10,startMin:30,duration:60,calType:"work",attendees:"Mitch Savage-Charman",location:"",htmlLink:""},
-  {id:"gcal-2",title:"Brendan Byrne & Abhay Soni",dayOffset:2,startHour:13,startMin:30,duration:30,calType:"work",attendees:"Abhay Soni",location:"Google Meet",htmlLink:""},
-  {id:"fam-2",title:"First Aid Webinar",dayOffset:0,startHour:19,startMin:0,duration:60,calType:"family",attendees:"",location:"",htmlLink:""},
-  {id:"fam-3",title:"Dr Lubna Naaz",dayOffset:1,startHour:11,startMin:45,duration:60,calType:"family",attendees:"",location:"29 Fitzgerald St Windsor",htmlLink:""},
-  {id:"fam-4",title:"Noa swimming makeup lesson",dayOffset:2,startHour:10,startMin:0,duration:60,calType:"family",attendees:"",location:"",htmlLink:""},
-  {id:"fam-5",title:"Madz touch footy",dayOffset:2,startHour:11,startMin:0,duration:180,calType:"family",attendees:"",location:"",htmlLink:""},
-  {id:"fam-6",title:"Meeting with Emergent",dayOffset:2,startHour:13,startMin:30,duration:60,calType:"family",attendees:"",location:"",htmlLink:""},
-  {id:"fam-7",title:"First Aid - Penrith",dayOffset:3,startHour:9,startMin:30,duration:240,calType:"family",attendees:"",location:"Penrith",htmlLink:""},
-  {id:"fam-8",title:"Psych - Barbara",dayOffset:3,startHour:14,startMin:0,duration:60,calType:"family",attendees:"",location:"",htmlLink:""},
-];
+// INIT_GCAL is intentionally empty — calendar events are fetched live via ↻ Sync
+const INIT_GCAL = [];
 
 // ─── RECURRING TASKS ─────────────────────────────────────────────────────────
 // type: "daily" | "weekly" | "weekday" | "monthly"
@@ -485,7 +476,7 @@ function EnergyDot({level}){
 
 // ─── PILLAR RING (Life Map) ────────────────────────────────────────────────────
 function PillarRing({pillar,pid,tasks,onSelect,selected}){
-  const meta=pillars[pid];
+  const meta=PILLARS[pid];
   const total=tasks.filter(t=>t.pillar===pid).length;
   const done=tasks.filter(t=>t.pillar===pid&&t.done).length;
   const active=tasks.filter(t=>t.pillar===pid&&t.status==="active"&&!t.done).length;
@@ -564,7 +555,13 @@ function CalBlock({item,color,onClick,col=0,cols=1,isTask=false,blockType="sched
 // ─── MAIN ─────────────────────────────────────────────────────────────────────
 export default function Syncn(){
   const [tasks,setTasks]=useState(loadTasks);
-  const [gcalEvents,setGcalEvents]=useState(INIT_GCAL);
+  const [gcalEvents,setGcalEvents]=useState(()=>{
+    try {
+      const saved = localStorage.getItem("syncn_gcal");
+      if(saved){ const p=JSON.parse(saved); if(Array.isArray(p)) return p; }
+    } catch(e) {}
+    return INIT_GCAL;
+  });
   const [theme,setTheme]=useState(loadTheme);
   // Keep module-level C in sync with React state
   C = THEMES[theme];
@@ -695,6 +692,11 @@ export default function Syncn(){
 
   // Auto-save pillars to localStorage — also sync module-level PILLARS ref
   useEffect(() => { savePillars(pillars); PILLARS = pillars; }, [pillars]);
+
+  // Auto-save gcal events (synced calendar) to localStorage
+  useEffect(() => {
+    try { localStorage.setItem("syncn_gcal", JSON.stringify(gcalEvents)); } catch(e) {}
+  }, [gcalEvents]);
 
   // Auto-save tasks to localStorage on every change
   useEffect(() => { saveTasks(tasks); }, [tasks]);
@@ -2117,7 +2119,7 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
                     const today=new Date(); today.setHours(0,0,0,0);
                     const dayOff=Math.round((date-today)/(864e5));
                     const colTasks=scheduledTasks.filter(t=>t.dayOffset===dayOff);
-                    const colRecurring=recurringInstances.filter(r=>r.dayOffset===dayOff);
+                    const colRecurring=recurringInstances.filter(r=>r.dayOffset===dayOff&&!r.isReminder);
                     const colEvents=visibleGcalEvents.filter(e=>e.dayOffset===dayOff);
                     const allItems=[...colTasks.map(t=>({...t,_isTask:true})),...colEvents.map(e=>({...e,_isTask:false})),...colRecurring.map(r=>({...r,_isTask:true,_isRecurring:true}))];
                     const withOverlap=computeOverlaps(allItems);
