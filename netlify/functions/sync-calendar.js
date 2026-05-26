@@ -12,33 +12,39 @@
 const FAMILY_CAL_ID = "mr6k6unuaegivoamfqbhfdaokh47384i@import.calendar.google.com";
 const PRIMARY_CAL_ID = "brendanlukebyrne@gmail.com";
 
-// Parse local time from ISO string, converting to AEST (UTC+10) when needed.
-// Named offset like +10:00 → read as-is. UTC "Z" suffix → shift +10hrs to AEST.
-const AEST_OFFSET = 10;
+// Parse the LOCAL calendar date and time from a Google Calendar ISO string.
+// Strategy: events with a named offset (+10:00) already encode local time in the
+// date/time portion. Events in UTC (Z) need shifting to AEST (+10).
+// We use Date.UTC for day-rollover arithmetic to avoid host-timezone interference.
+const AEST_OFFSET_HOURS = 10;
 
-function parseLocal(str) {
+function parseLocalDateTime(str) {
   if (!str) return null;
 
-  // All-day date only e.g. "2026-05-30"
-  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
-    const [year, month, day] = str.split("-").map(Number);
-    return { year, month, day, hour: 0, min: 0, allDay: true };
+  // All-day event — date-only string e.g. "2026-05-30"
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str.trim())) {
+    const [y, mo, d] = str.trim().split("-").map(Number);
+    return { year: y, month: mo, day: d, hour: 0, min: 0, allDay: true };
   }
 
+  // DateTime string
   const m = str.match(/(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
   if (!m) return null;
 
   let year = +m[1], month = +m[2], day = +m[3], hour = +m[4], min = +m[5];
 
-  // Has a named timezone offset like +10:00 or -05:00 — use as local time
-  const hasOffset = /[+-]\d{2}:\d{2}$/.test(str);
-  if (!hasOffset) {
-    // No offset = UTC, shift to AEST +10
-    hour += AEST_OFFSET;
+  // Named offset present (e.g. +10:00, -05:00) → date/time IS already local. Done.
+  const hasNamedOffset = /[+-]\d{2}:\d{2}$/.test(str);
+  if (!hasNamedOffset) {
+    // No offset = UTC — shift forward to AEST
+    hour += AEST_OFFSET_HOURS;
     if (hour >= 24) {
       hour -= 24;
-      const d = new Date(year, month - 1, day + 1);
-      year = d.getFullYear(); month = d.getMonth() + 1; day = d.getDate();
+      // Use UTC arithmetic for safe day rollover
+      const next = new Date(Date.UTC(year, month - 1, day + 1));
+      year = next.getUTCFullYear();
+      month = next.getUTCMonth() + 1;
+      day = next.getUTCDate();
     }
   }
 
@@ -48,29 +54,38 @@ function parseLocal(str) {
 function gcalToEvent(ev, calType) {
   const rawStart = ev.start?.dateTime || ev.start?.date || "";
   const rawEnd   = ev.end?.dateTime   || ev.end?.date   || "";
-  const start = parseLocal(rawStart);
-  const end   = parseLocal(rawEnd);
+
+  const start = parseLocalDateTime(rawStart);
+  const end   = parseLocalDateTime(rawEnd);
   if (!start) return null;
 
-  const duration = end
-    ? (end.hour * 60 + end.min) - (start.hour * 60 + start.min)
-    : 60;
+  // Duration in minutes
+  let dur = 60;
+  if (end) {
+    dur = (end.hour * 60 + end.min) - (start.hour * 60 + start.min);
+    if (dur < 0) dur += 24 * 60; // crosses midnight
+    if (dur === 0) dur = 60;
+  }
 
-  const date = new Date(start.year, start.month - 1, start.day);
-  const dow = date.getDay();
-  const dayIdx = dow >= 1 && dow <= 5 ? dow - 1 : dow === 6 ? 4 : 0;
+  // Day-of-week using UTC to avoid host timezone distorting the result
+  const utcD = new Date(Date.UTC(start.year, start.month - 1, start.day));
+  const dow = utcD.getUTCDay(); // 0=Sun..6=Sat → convert to Mon=0..Sun=6
+  const dayIdx = dow === 0 ? 6 : dow - 1;
 
-  // Fix duration for edge cases
-  let dur = end ? (end.hour * 60 + end.min) - (start.hour * 60 + start.min) : 60;
-  if (dur <= 0) dur = 60;
+  // Return a clean YYYY-MM-DD local date string as rawStart.
+  // The client splits on "T" and uses only the date part — giving this directly
+  // avoids any ambiguity in the client-side date parsing.
+  const localDateStr = [
+    start.year,
+    String(start.month).padStart(2, "0"),
+    String(start.day).padStart(2, "0"),
+  ].join("-");
 
   return {
     id: ev.id,
     title: ev.summary || "(No title)",
     dayIdx,
-    // rawStart MUST be returned so the client can compute accurate dayOffset
-    // The client extracts the date portion (before T) directly from this string
-    rawStart: rawStart,
+    rawStart: localDateStr,   // clean YYYY-MM-DD of the LOCAL date — safe to split on "T"
     startHour: start.hour,
     startMin: start.min,
     duration: Math.max(dur, 15),
