@@ -869,9 +869,7 @@ Existing blocks:${JSON.stringify([...visibleGcalEvents.filter(e=>e.dayOffset===0
           return acc;
         },0);
 
-        calSummary.push(`  Day+${d} ${dayName} (${freeMinutes>0?freeMinutes+" approx free hours":"PACKED"}):
-${dayEvents.length>0?dayEvents.join("
-"):"    [empty]"}`);
+        calSummary.push(`  Day+${d} ${dayName} (${freeMinutes>0?freeMinutes+" approx free hours":"PACKED"}):\n${dayEvents.length>0?dayEvents.join("\n"):"    [empty]"}`);
       }
 
       // Energy context
@@ -885,8 +883,7 @@ ${dayEvents.length>0?dayEvents.join("
       const prompt = `You are scheduling tasks for Brendan Byrne. Be EXTREMELY careful not to overlap with existing blocks.
 
 CALENDAR (all existing blocks — DO NOT place tasks during these times):
-${calSummary.join("
-")}
+${calSummary.join("\n")}
 
 ENERGY PROFILE:
 - Morning (7-11am): ${energyMap.morning} energy → best for creative/deep work
@@ -895,8 +892,7 @@ ENERGY PROFILE:
 - Evening (5-8pm): ${energyMap.evening} energy → admin, light tasks only
 
 TASKS TO SCHEDULE (in priority order):
-${toSched.map((t,i)=>`${i+1}. id=${t.id} "${t.title}" [${t.pillar}] ${t.priority} priority, ${t.duration}min`).join("
-")}
+${toSched.map((t,i)=>`${i+1}. id=${t.id} "${t.title}" [${t.pillar}] ${t.priority} priority, ${t.duration}min`).join("\n")}
 
 STRICT RULES:
 1. DO NOT place any task during an existing calendar/recurring/task block
