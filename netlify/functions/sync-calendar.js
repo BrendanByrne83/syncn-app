@@ -133,18 +133,32 @@ export async function handler(event, context) {
   }
 
   try {
-    // Get this week's Mon–Fri range
+    // Range: week (default) or month
+    const range = event.queryStringParameters?.range || "week";
     const now = new Date();
     const day = now.getDay() || 7;
     const mon = new Date(now);
-    mon.setDate(now.getDate() - (day - 1));
+    mon.setDate(now.getDate() - (day - 1)); // Start of this week Mon
     mon.setHours(0, 0, 0, 0);
-    const fri = new Date(mon);
-    fri.setDate(mon.getDate() + 4);
-    fri.setHours(23, 59, 59, 999);
 
-    const timeMin = mon.toISOString();
-    const timeMax = fri.toISOString();
+    let timeMin, timeMax;
+    if (range === "month") {
+      // 1 week back to 5 weeks forward (~6 weeks total)
+      const start = new Date(mon);
+      start.setDate(mon.getDate() - 7);
+      const end = new Date(mon);
+      end.setDate(mon.getDate() + 35);
+      end.setHours(23, 59, 59, 999);
+      timeMin = start.toISOString();
+      timeMax = end.toISOString();
+    } else {
+      // Default: Mon–Sun of current week
+      const fri = new Date(mon);
+      fri.setDate(mon.getDate() + 6);
+      fri.setHours(23, 59, 59, 999);
+      timeMin = mon.toISOString();
+      timeMax = fri.toISOString();
+    }
 
     const accessToken = await getAccessToken();
 
