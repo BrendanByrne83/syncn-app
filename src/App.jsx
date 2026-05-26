@@ -771,24 +771,216 @@ Existing blocks:${JSON.stringify([...visibleGcalEvents.filter(e=>e.dayOffset===0
   },[]);
 
   // ── AI Schedule ───────────────────────────────────────────────────────────
-  const autoSchedule=useCallback(async()=>{
-    const toSched=unscheduled.filter(t=>t.priority!=="Low").slice(0,10);
-    if(!toSched.length) return;
+  // ── SMART CONFLICT-AWARE SCHEDULER ──────────────────────────────────────────
+  // Step 1: Build a minute-accurate timeline of all occupied slots per day
+  // Step 2: Ask Claude for suggestions (with full context of what's blocked)
+  // Step 3: Validate every suggestion — reject any that overlap, find next free slot
+  // Step 4: Apply only validated, conflict-free placements
+
+  const buildDayTimeline = useCallback((dayOffset) => {
+    // Returns array of {start, end} in minutes-from-midnight for a given dayOffset
+    const slots = [];
+    const addSlot = (startHour, startMin, duration, buffer=15) => {
+      const start = startHour * 60 + startMin;
+      const end = start + duration + buffer; // include buffer gap
+      slots.push({start, end});
+    };
+    // Calendar events (hard blocks — no buffer needed, they're immovable)
+    visibleGcalEvents.filter(e=>e.dayOffset===dayOffset).forEach(e=>{
+      slots.push({start: e.startHour*60+e.startMin, end: e.startHour*60+e.startMin+e.duration});
+    });
+    // Recurring events
+    recurringInstances.filter(r=>r.dayOffset===dayOffset).forEach(r=>{
+      slots.push({start: r.startHour*60+r.startMin, end: r.startHour*60+r.startMin+r.duration});
+    });
+    // Already-scheduled tasks (with 15min buffer)
+    scheduledTasks.filter(t=>t.dayOffset===dayOffset).forEach(t=>{
+      addSlot(t.startHour, t.startMin, t.duration, 15);
+    });
+    return slots.sort((a,b)=>a.start-b.start);
+  }, [visibleGcalEvents, recurringInstances, scheduledTasks]);
+
+  const findFreeSlot = useCallback((dayOffset, durationMins, preferredStartMins=7*60, endMins=20*60) => {
+    // Find the next available slot on a given day that fits duration + 15min buffer
+    const timeline = buildDayTimeline(dayOffset);
+    const needed = durationMins + 15; // task + buffer after
+
+    let cursor = preferredStartMins;
+    while (cursor + durationMins <= endMins) {
+      const slotStart = cursor;
+      const slotEnd = cursor + needed;
+      const conflict = timeline.find(s => slotStart < s.end && slotEnd > s.start);
+      if (!conflict) return cursor; // free — return start in minutes
+      cursor = conflict.end; // jump past the conflict
+    }
+    return null; // no slot found this day
+  }, [buildDayTimeline]);
+
+  const autoSchedule = useCallback(async () => {
+    const toSched = unscheduled.filter(t => t.priority !== "Low").slice(0, 12);
+    if (!toSched.length) return;
     setScheduling(true);
-    const occupied=[
-      ...scheduledTasks.map(t=>({dayOffset:t.dayOffset,startHour:t.startHour,startMin:t.startMin,duration:t.duration})),
-      ...visibleGcalEvents.map(e=>({dayOffset:e.dayOffset,startHour:e.startHour,startMin:e.startMin,duration:e.duration})),
-    ];
-    // Energy-aware: prefer high energy hours for high priority tasks
-    const energyCtx=Object.entries(energyProfile).map(([h,e])=>`${h}:00=${e}/10`).join(", ");
-    const prompt=`Schedule these tasks across the next 7 days (dayOffset 0=today). Hours 7am-8pm. No overlaps. High priority tasks during high energy hours. Energy profile: ${energyCtx}. Min 15min gap. Return ONLY JSON: [{"id":N,"dayOffset":0-6,"startHour":7-19,"startMin":0}]\n\nExisting:${JSON.stringify(occupied)}\nTasks:${JSON.stringify(toSched.map(t=>({id:t.id,title:t.title,priority:t.priority,duration:t.duration,pillar:t.pillar})))}`;
-    try{
-      const reply=await callClaude([{role:"user",content:prompt}],"Scheduling AI. Return only valid JSON. No markdown.");
-      const parsed=JSON.parse(reply.replace(/```json|```/g,"").trim());
-      setTasks(prev=>prev.map(t=>{ const s=parsed.find(x=>x.id===t.id); return s?{...t,scheduled:true,dayOffset:s.dayOffset,startHour:s.startHour,startMin:s.startMin}:t; }));
-    }catch(e){console.error(e);}
+
+    try {
+      // Build human-readable calendar summary for Claude
+      const calSummary = [];
+      for (let d = 0; d <= 6; d++) {
+        const dayEvents = [
+          ...visibleGcalEvents.filter(e=>e.dayOffset===d).map(e=>
+            `    ${fmtT(e.startHour,e.startMin)}–${fmtT(e.startHour,e.startMin+e.duration)} [CALENDAR] ${e.title}`
+          ),
+          ...recurringInstances.filter(r=>r.dayOffset===d).map(r=>
+            `    ${fmtT(r.startHour,r.startMin)}–${fmtT(r.startHour,r.startMin+r.duration)} [RECURRING] ${r.title}`
+          ),
+          ...scheduledTasks.filter(t=>t.dayOffset===d).map(t=>
+            `    ${fmtT(t.startHour,t.startMin)}–${fmtT(t.startHour,t.startMin+t.duration)} [TASK] ${t.title}`
+          ),
+        ].sort();
+
+        const today = new Date(); today.setHours(0,0,0,0);
+        const dayDate = new Date(today); dayDate.setDate(today.getDate()+d);
+        const dayName = dayDate.toLocaleDateString("en-AU",{weekday:"short",day:"numeric",month:"short"});
+        const freeMinutes = [7*60,8*60,9*60,10*60,11*60,13*60,14*60,15*60,16*60,17*60].reduce((acc,mins) => {
+          const h = Math.floor(mins/60), m = mins%60;
+          if(findFreeSlot(d,60,mins,20*60)===mins) acc++;
+          return acc;
+        },0);
+
+        calSummary.push(`  Day+${d} ${dayName} (${freeMinutes>0?freeMinutes+" approx free hours":"PACKED"}):
+${dayEvents.length>0?dayEvents.join("
+"):"    [empty]"}`);
+      }
+
+      // Energy context
+      const energyMap = {
+        morning: energyRhythm?.morning?.level||"high",
+        midday: energyRhythm?.midday?.level||"peak",
+        afternoon: energyRhythm?.afternoon?.level||"medium",
+        evening: energyRhythm?.evening?.level||"low",
+      };
+
+      const prompt = `You are scheduling tasks for Brendan Byrne. Be EXTREMELY careful not to overlap with existing blocks.
+
+CALENDAR (all existing blocks — DO NOT place tasks during these times):
+${calSummary.join("
+")}
+
+ENERGY PROFILE:
+- Morning (7-11am): ${energyMap.morning} energy → best for creative/deep work
+- Midday (11am-1pm): ${energyMap.midday} energy → best for important meetings/strategy
+- Afternoon (1-5pm): ${energyMap.afternoon} energy → good for focused tasks
+- Evening (5-8pm): ${energyMap.evening} energy → admin, light tasks only
+
+TASKS TO SCHEDULE (in priority order):
+${toSched.map((t,i)=>`${i+1}. id=${t.id} "${t.title}" [${t.pillar}] ${t.priority} priority, ${t.duration}min`).join("
+")}
+
+STRICT RULES:
+1. DO NOT place any task during an existing calendar/recurring/task block
+2. Leave minimum 15 minutes between tasks
+3. Work hours only: 7am (hour=7) to 8pm (hour=20)
+4. Match energy — High priority tasks go in HIGH or PEAK energy periods
+5. Spread across multiple days — max 4 hours of tasks per day
+6. If a day is too packed, move to the next day
+7. Return startMin as 0, 15, 30, or 45 only
+
+Return ONLY a JSON array, no markdown:
+[{"id":N,"dayOffset":0-6,"startHour":7-19,"startMin":0|15|30|45}]`;
+
+      const reply = await callClaude(
+        [{role:"user",content:prompt}],
+        "You are a precise calendar scheduling AI. Return ONLY valid JSON. Never place events during existing blocks."
+      );
+      const parsed = JSON.parse(reply.replace(/```json|```/g,"").trim());
+
+      // ── POST-VALIDATION: check every suggestion against real timeline ──────
+      const validated = [];
+      const appliedThisRun = []; // track what we place in this run to avoid self-conflicts
+
+      for (const suggestion of parsed) {
+        const {id, dayOffset, startHour, startMin} = suggestion;
+        const task = toSched.find(t => t.id === id);
+        if (!task) continue;
+
+        const suggestedStart = startHour * 60 + startMin;
+        const suggestedEnd = suggestedStart + task.duration;
+
+        // Build timeline including tasks already placed in this scheduling run
+        const timeline = buildDayTimeline(dayOffset);
+        appliedThisRun.filter(a=>a.dayOffset===dayOffset).forEach(a=>{
+          timeline.push({start:a.startHour*60+a.startMin, end:a.startHour*60+a.startMin+a.duration+15});
+        });
+        timeline.sort((a,b)=>a.start-b.start);
+
+        // Check if Claude's suggestion is conflict-free
+        const hasConflict = timeline.some(s => suggestedStart < s.end && suggestedEnd+15 > s.start);
+
+        if (!hasConflict) {
+          // Claude's suggestion is good — use it
+          validated.push({id, dayOffset, startHour, startMin});
+          appliedThisRun.push({dayOffset, startHour, startMin, duration:task.duration});
+        } else {
+          // Claude's suggestion conflicts — find the next free slot on that day or following days
+          let placed = false;
+          for (let d = dayOffset; d <= 6 && !placed; d++) {
+            // Get energy preference for this task
+            const prefStart = task.priority === "High"
+              ? (energyMap.midday === "peak" ? 11*60 : 9*60)  // peak midday or morning
+              : 13*60; // afternoon for medium
+
+            const timeline2 = buildDayTimeline(d);
+            appliedThisRun.filter(a=>a.dayOffset===d).forEach(a=>{
+              timeline2.push({start:a.startHour*60+a.startMin, end:a.startHour*60+a.startMin+a.duration+15});
+            });
+            timeline2.sort((a,b)=>a.start-b.start);
+
+            // Try preferred start, then any free slot
+            const startPoints = [prefStart, 7*60, 8*60, 9*60, 10*60, 13*60, 14*60, 15*60, 16*60];
+            for (const sp of startPoints) {
+              if (sp < 7*60 || sp + task.duration > 20*60) continue;
+              const end = sp + task.duration;
+              const conflict = timeline2.some(s => sp < s.end && end+15 > s.start);
+              if (!conflict) {
+                const sh = Math.floor(sp/60);
+                const sm = (sp%60);
+                validated.push({id, dayOffset:d, startHour:sh, startMin:sm});
+                appliedThisRun.push({dayOffset:d, startHour:sh, startMin:sm, duration:task.duration});
+                placed = true;
+                break;
+              }
+            }
+
+            // If no preferred slot, try every 15min slot
+            if (!placed) {
+              for (let mins = 7*60; mins + task.duration <= 20*60; mins += 15) {
+                const end = mins + task.duration;
+                const conflict = timeline2.some(s => mins < s.end && end+15 > s.start);
+                if (!conflict) {
+                  validated.push({id, dayOffset:d, startHour:Math.floor(mins/60), startMin:mins%60});
+                  appliedThisRun.push({dayOffset:d, startHour:Math.floor(mins/60), startMin:mins%60, duration:task.duration});
+                  placed = true;
+                  break;
+                }
+              }
+            }
+          }
+          // If we still couldn't place it, skip — don't force an overlap
+          if (!placed) console.warn(`Could not find free slot for task ${id}: ${task.title}`);
+        }
+      }
+
+      // Apply only validated placements
+      setTasks(prev => prev.map(t => {
+        const s = validated.find(x => x.id === t.id);
+        return s ? {...t, scheduled:true, dayOffset:s.dayOffset, startHour:s.startHour, startMin:s.startMin} : t;
+      }));
+
+      console.log(`Scheduled ${validated.length}/${toSched.length} tasks (${toSched.length-validated.length} couldn't fit)`);
+    } catch(e) {
+      console.error("Schedule error:", e);
+    }
     setScheduling(false);
-  },[unscheduled,scheduledTasks,gcalEvents,energyProfile]);
+  }, [unscheduled, scheduledTasks, visibleGcalEvents, recurringInstances, energyProfile, energyRhythm, buildDayTimeline, findFreeSlot]);
 
   // ── Compass ──────────────────────────────────────────────────────────────
   const buildCompassContext=()=>{
