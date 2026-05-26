@@ -60,13 +60,20 @@ function gcalToEvent(ev, calType) {
   const dow = date.getDay();
   const dayIdx = dow >= 1 && dow <= 5 ? dow - 1 : dow === 6 ? 4 : 0;
 
+  // Fix duration for edge cases
+  let dur = end ? (end.hour * 60 + end.min) - (start.hour * 60 + start.min) : 60;
+  if (dur <= 0) dur = 60;
+
   return {
     id: ev.id,
     title: ev.summary || "(No title)",
     dayIdx,
+    // rawStart MUST be returned so the client can compute accurate dayOffset
+    // The client extracts the date portion (before T) directly from this string
+    rawStart: rawStart,
     startHour: start.hour,
     startMin: start.min,
-    duration: Math.max(duration, 15),
+    duration: Math.max(dur, 15),
     calType,
     location: ev.location || "",
     attendees: (ev.attendees || []).map(a => a.displayName || a.email).join(", "),
