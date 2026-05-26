@@ -545,7 +545,8 @@ export default function Syncn(){
     21:energyRhythm.night.level==="peak"?10:energyRhythm.night.level==="high"?8:energyRhythm.night.level==="medium"?5:3,
   };
   const [compassMsgs,setCompassMsgs]=useState([]);
-  const [compassActions,setCompassActions]=useState([]); // parsed task actions from Compass
+  const [compassActions,setCompassActions]=useState([]);
+  const [reminderPopup,setReminderPopup]=useState(null); // {dayOffset, rems[]} // parsed task actions from Compass
   const [compassInput,setCompassInput]=useState("");
   const [compassLoading,setCompassLoading]=useState(false);
   const [memory,setMemory]=useState(loadMemory);
@@ -1323,10 +1324,16 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
                                     style={{display:"flex",gap:6,alignItems:"flex-start",marginBottom:7,paddingBottom:7,borderBottom:`1px solid ${C.borderLight}`,cursor:"pointer"}}
                                     onMouseEnter={e=>e.currentTarget.style.opacity="0.75"}
                                     onMouseLeave={e=>e.currentTarget.style.opacity="1"}>
-                                    <div style={{width:6,height:6,borderRadius:"50%",background:item._color,marginTop:3,flexShrink:0}}/>
+                                    {item._type==="reminder"
+                                      ?<span style={{fontSize:13,flexShrink:0}}>🔔</span>
+                                      :<div style={{width:6,height:6,borderRadius:"50%",background:item._color,marginTop:3,flexShrink:0}}/>
+                                    }
                                     <div style={{flex:1,minWidth:0}}>
-                                      <div style={{fontSize:11,fontWeight:600,color:C.text,lineHeight:1.3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.title}</div>
-                                      <div style={{fontSize:9,color:C.textMuted,marginTop:1}}>{fmtT(item.startHour,item.startMin)}{item.duration?` · ${fmtD(item.duration)}`:""}</div>
+                                      <div style={{fontSize:11,fontWeight:600,color:item._type==="reminder"?C.medium:C.text,lineHeight:1.3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.title}</div>
+                                      <div style={{fontSize:9,color:C.textMuted,marginTop:1}}>
+                                        {fmtT(item.startHour,item.startMin)}
+                                        {item._type==="reminder"?" · Reminder":item.duration?` · ${fmtD(item.duration)}`:""}
+                                      </div>
                                     </div>
                                   </div>
                                 ))}
@@ -1394,8 +1401,9 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
                     const isCurrent=h===now.getHours();
                     const energy=energyProfile[h]||5;
                     return(
-                      <div key={h} style={{display:"flex",gap:10,marginBottom:3,opacity:isPast?0.4:1}}>
-                        <div style={{width:52,flexShrink:0,textAlign:"right",paddingTop:9,display:"flex",flexDirection:"column",alignItems:"flex-end",gap:2}}>
+                      <div key={h} style={{display:"flex",gap:10,marginBottom:3}}>
+                        {/* Time label fades when past — tasks do NOT */}
+                        <div style={{width:52,flexShrink:0,textAlign:"right",paddingTop:9,display:"flex",flexDirection:"column",alignItems:"flex-end",gap:2,opacity:isPast?0.35:1}}>
                           <span style={{fontSize:9,color:isCurrent?C.cyan:C.textFaint,fontWeight:isCurrent?700:400}}>{fmtT(h,0)}</span>
                           <EnergyDot level={energy}/>
                         </div>
@@ -1403,20 +1411,29 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
                           {items.map(item=>(
                             <div key={item.id} onClick={()=>setSelected({type:item._type==="task"?"task":"event",item})}
                               style={{
-                                background:item._type==="reminder"?"transparent":`${item._color}14`,
-                                border:item._type==="reminder"?`1px dashed ${item._color}40`:`1px solid ${item._color}30`,
-                                borderLeft:`3px solid ${item._color}`,
+                                background:item._type==="reminder"?"transparent":item.done?`${C.bgSurface}`:`${item._color}14`,
+                                border:item._type==="reminder"?`1px dashed ${item._color}40`:item.done?`1px solid ${C.border}`:`1px solid ${item._color}30`,
+                                borderLeft:`3px solid ${item.done?"#2a3a52":item._color}`,
                                 borderRadius:7,
                                 padding:item._type==="reminder"?"4px 11px":"7px 11px",
                                 marginBottom:4,cursor:"pointer",display:"flex",alignItems:"center",gap:8,
-                                opacity:item._type==="reminder"?0.85:1,
+                                // Only fade if explicitly marked done — NOT because time passed
+                                opacity:item.done?0.45:1,
                               }}>
                               <div style={{flex:1}}>
-                                <div style={{fontSize:12,fontWeight:700,color:C.text}}>{item.title}</div>
+                                <div style={{display:"flex",alignItems:"center",gap:5}}>
+                                  {item._type==="reminder"&&<span style={{fontSize:13}}>🔔</span>}
+                                  <div style={{fontSize:12,fontWeight:700,color:item._type==="reminder"?C.medium:C.text}}>{item.title}</div>
+                                </div>
                                 <div style={{fontSize:9,color:C.textMuted,marginTop:2}}>
-                                  {fmtT(item.startHour,item.startMin)} · {fmtD(item.duration)}
-                                  {item._type==="task"?` · ${PILLARS[item.pillar]?.label}`:" · Meeting"}
+                                  {fmtT(item.startHour,item.startMin)}
+                                  {item._type==="task"&&item.duration?` · ${fmtD(item.duration)}`:""}
+                                  {item._type==="task"?` · ${PILLARS[item.pillar]?.label}`:""}
+                                  {item._type==="event"?" · Meeting":""}
+                                  {item._type==="reminder"?" · Reminder — no time blocked":""}
+                                  {item._type==="recurring"?` · ${PILLARS[item.pillar]?.label}`:""}
                                   {item.attendees?` · ${item.attendees}`:""}
+                                  {item._type==="reminder"&&item.notes?` · ${item.notes}`:""}
                                 </div>
                               </div>
                               {item._type==="task"&&(
@@ -1568,12 +1585,53 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
                         const today2=new Date(); today2.setHours(0,0,0,0);
                         const colOff=Math.round((date-today2)/(864e5));
                         const dayRems=reminders.filter(r=>r.dayOffset===colOff&&!r.blockTime);
-                        return dayRems.length>0?<div style={{fontSize:8,color:C.medium,marginTop:1}}>🔔{dayRems.length}</div>:null;
+                        if(dayRems.length===0) return null;
+                        return(
+                          <div
+                            onClick={e=>{e.stopPropagation();setReminderPopup(reminderPopup?.dayOffset===colOff?null:{dayOffset:colOff,rems:dayRems});}}
+                            style={{fontSize:8,color:C.medium,marginTop:2,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:2,background:`${C.medium}18`,borderRadius:8,padding:"1px 5px",transition:"background 0.12s"}}
+                            title={dayRems.map(r=>r.title).join(", ")}
+                          >
+                            🔔 {dayRems.length}
+                          </div>
+                        );
                       })()}
                     </div>
                   );
                 })}
               </div>
+
+              {/* Reminder popup panel — shows when bell badge is clicked */}
+              {reminderPopup&&(
+                <div style={{background:`${C.medium}0d`,borderBottom:`1px solid ${C.medium}30`,padding:"10px 16px",flexShrink:0}}>
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+                    <div style={{fontSize:11,fontWeight:700,color:C.medium}}>
+                      🔔 Reminders — {reminderPopup.rems[0]&&(()=>{
+                        const today2=new Date(); today2.setHours(0,0,0,0);
+                        const d=new Date(today2); d.setDate(today2.getDate()+reminderPopup.dayOffset);
+                        return d.toLocaleDateString("en-AU",{weekday:"long",day:"numeric",month:"short"});
+                      })()}
+                    </div>
+                    <button onClick={()=>setReminderPopup(null)} style={{background:"none",border:"none",cursor:"pointer",color:C.textFaint,fontSize:16,lineHeight:1}}>×</button>
+                  </div>
+                  <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                    {reminderPopup.rems.map(r=>(
+                      <div key={r.id} style={{display:"flex",alignItems:"center",gap:10,background:C.bgCard,borderRadius:8,padding:"8px 12px",border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.medium}`}}>
+                        <span style={{fontSize:14,flexShrink:0}}>🔔</span>
+                        <div style={{flex:1}}>
+                          <div style={{fontSize:12,fontWeight:700,color:C.text}}>{r.title}</div>
+                          <div style={{fontSize:10,color:C.textMuted,marginTop:2}}>
+                            {fmtT(r.startHour,r.startMin)}
+                            {r.notes&&` · ${r.notes}`}
+                            <span style={{marginLeft:6,color:C.textFaint}}>(no time blocked)</span>
+                          </div>
+                        </div>
+                        <button onClick={()=>{setReminders(p=>p.filter(x=>x.id!==r.id));setReminderPopup(prev=>({...prev,rems:prev.rems.filter(x=>x.id!==r.id)}));}} style={{background:"none",border:`1px solid ${C.border}`,borderRadius:5,color:C.textFaint,fontSize:10,cursor:"pointer",padding:"2px 7px",flexShrink:0}}>✕</button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Grid */}
               <div ref={calScrollRef} style={{flex:1,overflowY:"auto"}}>
