@@ -457,18 +457,45 @@ export default function Syncn(){
   const [selectedPillar,setSelectedPillar]=useState(null);
   const [selectedSub,setSelectedSub]=useState(null);
   const [selected,setSelected]=useState(null); // {type,item}
-  const [addModal,setAddModal]=useState(null);
+  const [addModal,setAddModal]=useState(false);
+  const [addType,setAddType]=useState("task"); // task | meeting | reminder
   const [newItem,setNewItem]=useState({});
   const [addProjectModal,setAddProjectModal]=useState(false);
   const [newProject,setNewProject]=useState({pillar:"film",name:""});
   const [customSubs,setCustomSubs]=useState({});
-  const [energyProfile,setEnergyProfile]=useState(DEFAULT_ENERGY);
+  const [energyRhythm,setEnergyRhythm]=useState({
+    morning:{label:"Morning",hours:"6-11am",level:"high"},
+    midday:{label:"Midday",hours:"11am-1pm",level:"peak"},
+    afternoon:{label:"Afternoon",hours:"1-5pm",level:"medium"},
+    evening:{label:"Evening",hours:"5-8pm",level:"low"},
+    night:{label:"Night",hours:"8pm+",level:"low"},
+  });
   const [energyModal,setEnergyModal]=useState(false);
+  // Legacy energy profile for scheduling compatibility
+  const energyProfile = {
+    6:energyRhythm.morning.level==="peak"?10:energyRhythm.morning.level==="high"?8:energyRhythm.morning.level==="medium"?5:3,
+    7:energyRhythm.morning.level==="peak"?10:energyRhythm.morning.level==="high"?8:energyRhythm.morning.level==="medium"?5:3,
+    8:energyRhythm.morning.level==="peak"?10:energyRhythm.morning.level==="high"?8:energyRhythm.morning.level==="medium"?5:3,
+    9:energyRhythm.morning.level==="peak"?10:energyRhythm.morning.level==="high"?8:energyRhythm.morning.level==="medium"?5:3,
+    10:energyRhythm.morning.level==="peak"?10:energyRhythm.morning.level==="high"?8:energyRhythm.morning.level==="medium"?5:3,
+    11:energyRhythm.midday.level==="peak"?10:energyRhythm.midday.level==="high"?8:energyRhythm.midday.level==="medium"?5:3,
+    12:energyRhythm.midday.level==="peak"?10:energyRhythm.midday.level==="high"?8:energyRhythm.midday.level==="medium"?5:3,
+    13:energyRhythm.afternoon.level==="peak"?10:energyRhythm.afternoon.level==="high"?8:energyRhythm.afternoon.level==="medium"?5:3,
+    14:energyRhythm.afternoon.level==="peak"?10:energyRhythm.afternoon.level==="high"?8:energyRhythm.afternoon.level==="medium"?5:3,
+    15:energyRhythm.afternoon.level==="peak"?10:energyRhythm.afternoon.level==="high"?8:energyRhythm.afternoon.level==="medium"?5:3,
+    16:energyRhythm.afternoon.level==="peak"?10:energyRhythm.afternoon.level==="high"?8:energyRhythm.afternoon.level==="medium"?5:3,
+    17:energyRhythm.evening.level==="peak"?10:energyRhythm.evening.level==="high"?8:energyRhythm.evening.level==="medium"?5:3,
+    18:energyRhythm.evening.level==="peak"?10:energyRhythm.evening.level==="high"?8:energyRhythm.evening.level==="medium"?5:3,
+    19:energyRhythm.evening.level==="peak"?10:energyRhythm.evening.level==="high"?8:energyRhythm.evening.level==="medium"?5:3,
+    20:energyRhythm.night.level==="peak"?10:energyRhythm.night.level==="high"?8:energyRhythm.night.level==="medium"?5:3,
+    21:energyRhythm.night.level==="peak"?10:energyRhythm.night.level==="high"?8:energyRhythm.night.level==="medium"?5:3,
+  };
   const [compassMsgs,setCompassMsgs]=useState([]);
   const [compassInput,setCompassInput]=useState("");
   const [compassLoading,setCompassLoading]=useState(false);
   const [memory,setMemory]=useState(loadMemory);
   const [briefingDone,setBriefingDone]=useState(false);
+  const [reminders,setReminders]=useState([]); // {id,title,dayOffset,startHour,startMin,blockTime,notes}
   const [recurringTasks,setRecurringTasks]=useState(INIT_RECURRING);
   const [archive,setArchive]=useState([]); // completed tasks older than 7 days
   const [showArchive,setShowArchive]=useState(false);
@@ -481,6 +508,7 @@ export default function Syncn(){
   const [freedSlot,setFreedSlot]=useState(null); // {dateKey, startHour, startMin, duration}
   const [eveningPlanModal,setEveningPlanModal]=useState(false);
   const [eveningPlanLoading,setEveningPlanLoading]=useState(false);
+  const [sidebarMode,setSidebarMode]=useState("expanded"); // expanded | collapsed | hidden
   const [hiddenEvents,setHiddenEvents]=useState(()=>{
     try{ return JSON.parse(localStorage.getItem("syncn_hidden_events")||"[]"); }catch{ return []; }
   });
@@ -542,10 +570,12 @@ export default function Syncn(){
   const todayTasks=scheduledTasks.filter(t=>t.dayOffset===0);
   const todayEvents=visibleGcalEvents.filter(e=>e.dayOffset===0);
   const todayRecurring = recurringInstances.filter(r => r.dayOffset === 0);
+  const todayReminders = reminders.filter(r => r.dayOffset === 0);
   const todayAll=[
     ...todayTasks.map(t=>({...t,_type:"task",_color:PILLARS[t.pillar]?.color||C.cyan})),
     ...todayEvents.map(e=>({...e,_type:"event",_color:e.calType==="family"?PILLARS.family.color:C.cyan})),
     ...todayRecurring.map(r=>({...r,_type:"recurring",_color:PILLARS[r.pillar]?.color||C.cyan})),
+    ...todayReminders.map(r=>({...r,_type:"reminder",_color:"#d4a843"})),
   ].sort((a,b)=>(a.startHour*60+a.startMin)-(b.startHour*60+b.startMin));
 
   const allSubs=(pid)=>[...(PILLARS[pid]?.sub||[]),...(customSubs[pid]||[])];
@@ -824,13 +854,22 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
 
   const handleAdd=()=>{
     if(!newItem.title?.trim()) return;
-    if(addModal==="event"){
-      setGcalEvents(p=>[...p,{id:`manual-${nextId++}`,calType:"work",dayOffset:newItem.dayOffset??0,...newItem}]);
-    } else if(addModal==="block"){
-      setGcalEvents(p=>[...p,{id:`block-${nextId++}`,calType:"block",title:newItem.title,dayOffset:newItem.dayOffset??0,startHour:newItem.startHour??9,startMin:newItem.startMin??0,duration:newItem.duration??60,location:"",attendees:"",htmlLink:""}]);
+    if(addType==="meeting"){
+      setGcalEvents(p=>[...p,{id:`manual-${nextId++}`,calType:"work",dayOffset:newItem.dayOffset??0,startHour:newItem.startHour??9,startMin:newItem.startMin??0,duration:newItem.duration??60,location:newItem.location||"",attendees:newItem.attendees||"",htmlLink:"",title:newItem.title}]);
+      // Handle meeting recurrence
+      if(newItem._recurring&&newItem._recurring!=="never"){
+        setRecurringTasks(p=>[...p,{id:`rec-${nextId++}`,title:newItem.title,pillar:"business",sub:"",priority:"Medium",duration:newItem.duration||60,status:"active",notes:newItem.notes||"",recurrence:{type:newItem._recurring,days:newItem._recurDays||[],startHour:newItem.startHour||9,startMin:newItem.startMin||0,endDate:newItem._endDate||null},exceptions:{}}]);
+      }
+    } else if(addType==="reminder"){
+      const reminder = {id:`reminder-${nextId++}`,title:newItem.title,dayOffset:newItem.dayOffset??0,startHour:newItem.startHour??9,startMin:newItem.startMin??0,blockTime:!!newItem._blockTime,notes:newItem.notes||""};
+      setReminders(p=>[...p,reminder]);
+      if(newItem._blockTime){
+        setGcalEvents(p=>[...p,{id:`block-${nextId++}`,calType:"block",title:newItem.title,dayOffset:newItem.dayOffset??0,startHour:newItem.startHour??9,startMin:newItem.startMin??0,duration:newItem.duration||30,location:"",attendees:"",htmlLink:""}]);
+      }
     } else {
+      // task
       const schedNow = newItem._scheduleNow && newItem.dayOffset!=null && newItem.startHour!=null;
-      const {_scheduleNow, ...rest} = newItem;
+      const {_scheduleNow,_recurring,_recurDays,_endDate,_blockTime,...rest} = newItem;
       setTasks(p=>[...p,{id:nextId++,done:false,postponeCount:0,blockerSurfaced:false,
         scheduled:schedNow,
         dayOffset:schedNow?rest.dayOffset:null,
@@ -838,8 +877,12 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
         startMin:schedNow?(rest.startMin??0):null,
         ...rest
       }]);
+      if(_recurring&&_recurring!=="never"){
+        setRecurringTasks(p=>[...p,{id:`rec-${nextId++}`,title:rest.title,pillar:rest.pillar||"film",sub:rest.sub||"",priority:rest.priority||"Medium",duration:rest.duration||60,status:"active",notes:rest.notes||"",recurrence:{type:_recurring,days:_recurDays||[],startHour:rest.startHour||9,startMin:rest.startMin||0,endDate:_endDate||null},exceptions:{}}]);
+      }
     }
-    setAddModal(null);
+    setAddModal(false);
+    setNewItem({});
   };
 
   const handleCalClick=(e,dayOffset)=>{
@@ -861,106 +904,163 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
     <div style={{height:"100vh",display:"flex",flexDirection:"column",fontFamily:"'DM Sans','Helvetica Neue',sans-serif",background:C.bg,color:C.text,overflow:"hidden"}}>
 
       {/* ── NAV BAR ── */}
-      <div style={{background:C.bgCard,borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"center",padding:"0 16px",height:48,gap:8,flexShrink:0}}>
-        <div style={{display:"flex",alignItems:"center",gap:7,marginRight:10}}>
-          <Logo size={24}/>
-          <span style={{fontSize:14,fontWeight:800,letterSpacing:-0.5}}>Sync<span style={{color:C.cyan}}>'n</span></span>
+      {/* TOP BAR */}
+      <div style={{background:C.bgCard,borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"center",padding:"0 12px",height:48,gap:8,flexShrink:0,zIndex:20}}>
+        {/* Hamburger */}
+        <button
+          onClick={()=>setSidebarMode(m=>m==="expanded"?"collapsed":m==="collapsed"?"hidden":"expanded")}
+          title={sidebarMode==="expanded"?"Collapse sidebar":sidebarMode==="collapsed"?"Hide sidebar":"Expand sidebar"}
+          style={{background:"none",border:"none",cursor:"pointer",padding:"5px 6px",borderRadius:6,color:C.textMuted,fontSize:15,lineHeight:1,flexShrink:0,transition:"color 0.15s"}}
+          onMouseEnter={e=>e.currentTarget.style.color=C.text}
+          onMouseLeave={e=>e.currentTarget.style.color=C.textMuted}
+        >{sidebarMode==="hidden"?"▶":"☰"}</button>
+
+        <div style={{display:"flex",alignItems:"center",gap:6,marginRight:6}}>
+          <Logo size={22}/>
+          <span style={{fontSize:13,fontWeight:800,letterSpacing:-0.5}}>Sync<span style={{color:C.cyan}}>'n</span></span>
         </div>
 
-        {/* Nav */}
+        {/* Nav tabs */}
         <div style={{display:"flex",gap:1,background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:2}}>
-          {[["mission","⚡ Mission"],["today","📋 Today"],["lifemap","🗺 Life Map"],["calendar","📅 Calendar"],["compass","✦ Compass"]].map(([s,l])=>(
+          {[["mission","⚡","Mission"],["today","📋","Today"],["lifemap","🗺","Life Map"],["calendar","📅","Calendar"],["compass","✦","Compass"]].map(([s,ic,l])=>(
             <button key={s} onClick={()=>setScreen(s)} style={{
-              padding:"4px 11px",borderRadius:6,border:"none",cursor:"pointer",fontSize:11,fontWeight:700,
+              padding:"4px 9px",borderRadius:6,border:"none",cursor:"pointer",fontSize:11,fontWeight:700,
               background:screen===s?C.bgSurface:"transparent",
               color:screen===s?(s==="compass"?C.cyan:C.text):C.textMuted,
               boxShadow:screen===s&&s==="compass"?`0 0 8px ${C.cyanGlow}`:"none",
-              transition:"all 0.12s"
-            }}>{l}</button>
+              transition:"all 0.12s",whiteSpace:"nowrap",
+            }}>{ic} {l}</button>
           ))}
         </div>
 
-        {/* Quick search */}
-        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search tasks…"
-          style={{...inp,width:150,border:`1px solid ${C.border}`,marginLeft:4}}/>
+        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search…"
+          style={{...inp,width:130,border:`1px solid ${C.border}`}}/>
 
-        {/* Actions */}
-        <div style={{marginLeft:"auto",display:"flex",gap:7,alignItems:"center"}}>
-          {/* Warnings */}
+        <div style={{marginLeft:"auto",display:"flex",gap:6,alignItems:"center"}}>
           {warnings.length>0&&(
-            <div style={{fontSize:10,color:C.medium,background:`${C.medium}12`,border:`1px solid ${C.medium}40`,borderRadius:6,padding:"3px 8px"}}>
-              ⚠ {warnings[0].meta.label} needs attention
+            <div style={{fontSize:10,color:C.medium,background:`${C.medium}12`,border:`1px solid ${C.medium}40`,borderRadius:6,padding:"3px 8px",whiteSpace:"nowrap"}}>
+              ⚠ {warnings[0].meta.label}
             </div>
           )}
-
-          {/* Sync */}
-          <button onClick={syncCalendar} disabled={calLoading} style={{...btn(calLoading?C.bgSurface:`${C.cyan}14`,calLoading?C.textMuted:C.cyan,calLoading?C.border:C.cyanDim),fontSize:10}}>
+          <button onClick={syncCalendar} disabled={calLoading}
+            style={{...btn(calLoading?C.bgSurface:`${C.cyan}14`,calLoading?C.textMuted:C.cyan,calLoading?C.border:C.cyanDim),fontSize:10}}>
             {calLoading?"⟳":"↻"} Sync
           </button>
-
-          {/* AI Schedule */}
           {unscheduled.filter(t=>t.priority!=="Low").length>0&&(
-            <button onClick={autoSchedule} disabled={scheduling} style={{...btn(scheduling?C.bgSurface:`${C.cyan}14`,scheduling?C.textMuted:C.cyan,C.cyanDim),fontSize:10}}>
-              {scheduling?"⟳ Scheduling…":`✦ AI Schedule (${unscheduled.filter(t=>t.priority!=="Low").length})`}
+            <button onClick={autoSchedule} disabled={scheduling}
+              style={{...btn(scheduling?C.bgSurface:`${C.cyan}14`,scheduling?C.textMuted:C.cyan,C.cyanDim),fontSize:10}}>
+              {scheduling?"⟳":`✦ AI (${unscheduled.filter(t=>t.priority!=="Low").length})`}
             </button>
           )}
-
-          {/* Check-in */}
-          <button onClick={checkIn} style={{...btn(`${C.cyan}18`,C.cyan,C.cyanDim),fontSize:10}}>✦ Check In</button>
-
-          {/* Add Task */}
-          <button onClick={()=>{setNewItem({pillar:"film",sub:"CROWE",title:"",priority:"High",duration:60,status:"active",notes:"",deadline:""});setAddModal("task");}}
-            style={{background:`linear-gradient(135deg,${C.cyan},${C.cyanDim})`,color:"#000",border:"none",borderRadius:7,padding:"5px 14px",fontSize:11,fontWeight:800,cursor:"pointer"}}>+ Task</button>
+          <button
+            onClick={()=>{setAddType("task");setNewItem({pillar:"film",sub:"",title:"",priority:"High",duration:60,status:"active",notes:"",deadline:""});setAddModal(true);}}
+            style={{background:`linear-gradient(135deg,${C.cyan},${C.cyanDim})`,color:"#000",border:"none",borderRadius:7,padding:"5px 18px",fontSize:12,fontWeight:800,cursor:"pointer"}}>
+            + Add
+          </button>
         </div>
       </div>
 
       {/* ── BODY ── */}
       <div style={{flex:1,display:"flex",overflow:"hidden"}}>
 
-        {/* LEFT SIDEBAR */}
-        <div style={{width:180,background:C.bgCard,borderRight:`1px solid ${C.border}`,overflowY:"auto",flexShrink:0,display:"flex",flexDirection:"column"}}>
-          <div style={{padding:"10px 8px",flex:1}}>
-            {Object.entries(PILLARS).map(([pid,meta])=>{
-              const isActive=selectedPillar===pid;
-              const ct=tasks.filter(t=>t.pillar===pid&&!t.done&&t.status!=="parked").length;
-              const subs=allSubs(pid);
-              return(
-                <div key={pid}>
-                  <button onClick={()=>{setSelectedPillar(isActive?null:pid);setSelectedSub(null);}} style={{
-                    width:"100%",textAlign:"left",padding:"5px 8px",border:"none",cursor:"pointer",
-                    background:isActive?`${meta.color}14`:"transparent",
-                    display:"flex",alignItems:"center",gap:6,borderRadius:6,
-                    borderLeft:isActive?`2px solid ${meta.color}`:"2px solid transparent",marginBottom:1,
-                  }}>
-                    <span style={{fontSize:12}}>{meta.icon}</span>
-                    <span style={{fontSize:10,fontWeight:isActive?700:400,color:isActive?meta.color:C.textMuted,flex:1,lineHeight:1.3}}>{meta.label}</span>
-                    {ct>0&&<span style={{fontSize:8,background:C.bgSurface,borderRadius:8,padding:"1px 5px",color:C.textFaint,fontWeight:700}}>{ct}</span>}
-                  </button>
-                  {isActive&&subs.map(sub=>(
-                    <button key={sub} onClick={()=>setSelectedSub(selectedSub===sub?null:sub)} style={{
-                      width:"100%",textAlign:"left",padding:"3px 10px 3px 26px",border:"none",cursor:"pointer",
-                      background:selectedSub===sub?`${meta.color}10`:"transparent",
-                      fontSize:10,color:selectedSub===sub?meta.color:C.textFaint,fontWeight:selectedSub===sub?600:400,borderRadius:4,marginBottom:1,
-                    }}>{sub}</button>
-                  ))}
-                  {isActive&&pid!=="parking"&&(
-                    <button onClick={()=>{setNewProject({pillar:pid,name:""});setAddProjectModal(true);}} style={{
-                      width:"100%",textAlign:"left",padding:"3px 10px 3px 26px",border:"none",cursor:"pointer",
-                      background:"transparent",fontSize:9,color:C.textFaint,borderRadius:4,marginBottom:3,
-                    }}>+ Add sub-pillar</button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-          {/* Energy setup */}
-          <button onClick={()=>setEnergyModal(true)} style={{
-            margin:"8px",background:C.bgSurface,border:`1px solid ${C.border}`,borderRadius:7,
-            padding:"7px 10px",fontSize:10,color:C.textMuted,cursor:"pointer",textAlign:"left"
-          }}>
-            ⚡ Energy Profile
-            <div style={{fontSize:8,color:C.textFaint,marginTop:2}}>Set your peak hours</div>
-          </button>
+
+        {/* LEFT SIDEBAR — three modes: expanded(180px) | collapsed(40px) | hidden(0px) */}
+        <div style={{
+          width:sidebarMode==="expanded"?180:sidebarMode==="collapsed"?40:0,
+          minWidth:sidebarMode==="expanded"?180:sidebarMode==="collapsed"?40:0,
+          background:C.bgCard,
+          borderRight:sidebarMode==="hidden"?"none":`1px solid ${C.border}`,
+          overflowY:"auto",overflowX:"hidden",
+          flexShrink:0,display:"flex",flexDirection:"column",
+          transition:"width 0.2s ease, min-width 0.2s ease",
+        }}>
+
+          {/* EXPANDED MODE */}
+          {sidebarMode==="expanded"&&(
+            <div style={{padding:"10px 8px",flex:1,minWidth:180}}>
+              {Object.entries(PILLARS).map(([pid,meta])=>{
+                const isActive=selectedPillar===pid;
+                const ct=tasks.filter(t=>t.pillar===pid&&!t.done&&t.status!=="parked").length;
+                const subs=allSubs(pid);
+                return(
+                  <div key={pid}>
+                    <button onClick={()=>{setSelectedPillar(isActive?null:pid);setSelectedSub(null);}} style={{
+                      width:"100%",textAlign:"left",padding:"5px 8px",border:"none",cursor:"pointer",
+                      background:isActive?`${meta.color}14`:"transparent",
+                      display:"flex",alignItems:"center",gap:6,borderRadius:6,
+                      borderLeft:isActive?`2px solid ${meta.color}`:"2px solid transparent",marginBottom:1,
+                    }}>
+                      <span style={{fontSize:12}}>{meta.icon}</span>
+                      <span style={{fontSize:10,fontWeight:isActive?700:400,color:isActive?meta.color:C.textMuted,flex:1,lineHeight:1.3}}>{meta.label}</span>
+                      {ct>0&&<span style={{fontSize:8,background:C.bgSurface,borderRadius:8,padding:"1px 5px",color:C.textFaint,fontWeight:700}}>{ct}</span>}
+                    </button>
+                    {isActive&&subs.map(sub=>(
+                      <button key={sub} onClick={()=>setSelectedSub(selectedSub===sub?null:sub)} style={{
+                        width:"100%",textAlign:"left",padding:"3px 10px 3px 26px",border:"none",cursor:"pointer",
+                        background:selectedSub===sub?`${meta.color}10`:"transparent",
+                        fontSize:10,color:selectedSub===sub?meta.color:C.textFaint,fontWeight:selectedSub===sub?600:400,borderRadius:4,marginBottom:1,
+                      }}>{sub}</button>
+                    ))}
+                    {isActive&&pid!=="parking"&&(
+                      <button onClick={()=>{setNewProject({pillar:pid,name:""});setAddProjectModal(true);}} style={{
+                        width:"100%",textAlign:"left",padding:"3px 10px 3px 26px",border:"none",cursor:"pointer",
+                        background:"transparent",fontSize:9,color:C.textFaint,borderRadius:4,marginBottom:3,
+                      }}>+ Add sub-pillar</button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* COLLAPSED MODE — coloured dots with tooltips */}
+          {sidebarMode==="collapsed"&&(
+            <div style={{padding:"10px 0",display:"flex",flexDirection:"column",alignItems:"center",gap:4,minWidth:40}}>
+              {Object.entries(PILLARS).map(([pid,meta])=>{
+                const isActive=selectedPillar===pid;
+                const ct=tasks.filter(t=>t.pillar===pid&&!t.done&&t.status!=="parked").length;
+                return(
+                  <div key={pid} style={{position:"relative",width:"100%",display:"flex",justifyContent:"center"}}
+                    onMouseEnter={e=>{const tip=e.currentTarget.querySelector(".tip");if(tip)tip.style.opacity="1";}}
+                    onMouseLeave={e=>{const tip=e.currentTarget.querySelector(".tip");if(tip)tip.style.opacity="0";}}>
+                    <button onClick={()=>{setSelectedPillar(isActive?null:pid);setSelectedSub(null);setSidebarMode("expanded");}} style={{
+                      width:28,height:28,borderRadius:"50%",border:"none",cursor:"pointer",
+                      background:isActive?meta.color:`${meta.color}40`,
+                      boxShadow:isActive?`0 0 8px ${meta.color}60`:"none",
+                      transition:"all 0.15s",position:"relative",flexShrink:0,
+                    }}>
+                      {ct>0&&<span style={{position:"absolute",top:-3,right:-3,width:12,height:12,borderRadius:"50%",background:C.high,fontSize:7,fontWeight:800,color:"#fff",display:"flex",alignItems:"center",justifyContent:"center"}}>{ct>9?"9+":ct}</span>}
+                    </button>
+                    {/* Tooltip */}
+                    <div className="tip" style={{
+                      position:"absolute",left:"100%",top:"50%",transform:"translateY(-50%)",
+                      marginLeft:8,background:C.bgCard,border:`1px solid ${C.border}`,
+                      borderRadius:6,padding:"4px 8px",fontSize:10,fontWeight:600,color:meta.color,
+                      whiteSpace:"nowrap",pointerEvents:"none",opacity:0,transition:"opacity 0.15s",
+                      zIndex:50,boxShadow:"0 4px 12px rgba(0,0,0,0.3)",
+                    }}>{meta.icon} {meta.label}</div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* BOTTOM: Energy profile (expanded only) */}
+          {sidebarMode==="expanded"&&(
+            <button onClick={()=>setEnergyModal(true)} style={{
+              margin:"8px",background:C.bgSurface,border:`1px solid ${C.border}`,borderRadius:7,
+              padding:"7px 10px",fontSize:10,color:C.textMuted,cursor:"pointer",textAlign:"left",flexShrink:0,
+            }}>
+              ⚡ Energy Rhythm
+              <div style={{fontSize:8,color:C.textFaint,marginTop:2}}>Set your peak periods</div>
+            </button>
+          )}
+          {sidebarMode==="collapsed"&&(
+            <button onClick={()=>setEnergyModal(true)} title="Energy Rhythm" style={{
+              margin:"4px auto",background:"none",border:"none",cursor:"pointer",
+              fontSize:16,lineHeight:1,display:"block",opacity:0.5,
+            }}>⚡</button>
+          )}
         </div>
 
         {/* MAIN CONTENT */}
@@ -1126,7 +1226,15 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
                         <div style={{flex:1,borderLeft:`1px solid ${isCurrent?C.cyan:C.border}`,paddingLeft:10,paddingTop:4,minHeight:36}}>
                           {items.map(item=>(
                             <div key={item.id} onClick={()=>setSelected({type:item._type==="task"?"task":"event",item})}
-                              style={{background:`${item._color}14`,border:`1px solid ${item._color}30`,borderLeft:`3px solid ${item._color}`,borderRadius:7,padding:"7px 11px",marginBottom:4,cursor:"pointer",display:"flex",alignItems:"center",gap:8}}>
+                              style={{
+                                background:item._type==="reminder"?"transparent":`${item._color}14`,
+                                border:item._type==="reminder"?`1px dashed ${item._color}40`:`1px solid ${item._color}30`,
+                                borderLeft:`3px solid ${item._color}`,
+                                borderRadius:7,
+                                padding:item._type==="reminder"?"4px 11px":"7px 11px",
+                                marginBottom:4,cursor:"pointer",display:"flex",alignItems:"center",gap:8,
+                                opacity:item._type==="reminder"?0.85:1,
+                              }}>
                               <div style={{flex:1}}>
                                 <div style={{fontSize:12,fontWeight:700,color:C.text}}>{item.title}</div>
                                 <div style={{fontSize:9,color:C.textMuted,marginTop:2}}>
@@ -1142,6 +1250,9 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
                                   </div>
                                   <button onClick={e=>{e.stopPropagation();postponeTask(item.id);}} style={{background:"none",border:`1px solid ${C.border}`,borderRadius:4,color:C.textFaint,fontSize:9,cursor:"pointer",padding:"0 5px"}}>↩</button>
                                 </div>
+                              )}
+                              {item._type==="reminder"&&(
+                                <button onClick={e=>{e.stopPropagation();setReminders(p=>p.filter(r=>r.id!==item.id));}} style={{background:"none",border:`1px solid ${C.border}`,borderRadius:4,color:C.textFaint,fontSize:9,cursor:"pointer",padding:"0 5px"}}>✕</button>
                               )}
                             </div>
                           ))}
@@ -1277,6 +1388,12 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
                     <div key={i} style={{textAlign:"center",padding:"6px 2px",borderLeft:`1px solid ${C.borderLight}`,background:isWeekend?`${C.bgSurface}66`:"transparent"}}>
                       <div style={{fontSize:9,fontWeight:700,letterSpacing:0.5,textTransform:"uppercase",color:isToday?C.cyan:isWeekend?C.textFaint:C.textMuted}}>{DAY_NAMES[i]}</div>
                       <div style={{fontSize:14,fontWeight:700,width:26,height:26,borderRadius:"50%",display:"inline-flex",alignItems:"center",justifyContent:"center",marginTop:2,color:isToday?"#000":C.text,background:isToday?C.cyan:"transparent",boxShadow:isToday?`0 0 12px ${C.cyanGlow}`:"none"}}>{date.getDate()}</div>
+                      {(()=>{
+                        const today2=new Date(); today2.setHours(0,0,0,0);
+                        const colOff=Math.round((date-today2)/(864e5));
+                        const dayRems=reminders.filter(r=>r.dayOffset===colOff&&!r.blockTime);
+                        return dayRems.length>0?<div style={{fontSize:8,color:C.medium,marginTop:1}}>🔔{dayRems.length}</div>:null;
+                      })()}
                     </div>
                   );
                 })}
@@ -1513,21 +1630,40 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
         </div>
       )}
 
-      {/* ── ADD MODAL ── */}
+      {/* ── UNIVERSAL ADD MODAL ── */}
       {addModal&&(
-        <div onClick={()=>setAddModal(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.65)",zIndex:150,display:"flex",alignItems:"center",justifyContent:"center"}}>
-          <div onClick={e=>e.stopPropagation()} style={{background:C.bgCard,borderRadius:16,padding:24,width:460,maxWidth:"92vw",boxShadow:`0 24px 60px rgba(0,0,0,0.7),0 0 0 1px ${C.border}`}}>
-            <h3 style={{margin:"0 0 16px",fontSize:15,fontWeight:800,color:C.text}}>
-              {addModal==="task"?"New Task":addModal==="event"?"New Meeting":"Block Time"}
-            </h3>
-            <div style={{display:"flex",flexDirection:"column",gap:9}}>
-              <input autoFocus value={newItem.title||""} onChange={e=>setNewItem(n=>({...n,title:e.target.value}))}
-                placeholder={addModal==="task"?"What needs doing?":addModal==="event"?"Meeting title…":"What are you blocking?"}
-                style={{...inp,fontSize:13,padding:"10px 12px"}}/>
-              {addModal==="task"&&(<>
+        <div onClick={()=>{setAddModal(false);setNewItem({});}} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.65)",zIndex:150,display:"flex",alignItems:"center",justifyContent:"center"}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:C.bgCard,borderRadius:16,padding:24,width:500,maxWidth:"94vw",maxHeight:"88vh",overflowY:"auto",boxShadow:`0 24px 60px rgba(0,0,0,0.7),0 0 0 1px ${C.border}`}}>
+
+            {/* Type selector */}
+            <div style={{display:"flex",gap:4,marginBottom:20,background:C.bg,borderRadius:10,padding:3}}>
+              {[["task","Task","📋"],["meeting","Meeting","📅"],["reminder","Reminder","🔔"]].map(([t,l,ic])=>(
+                <button key={t} onClick={()=>{setAddType(t);setNewItem(prev=>({title:prev.title||""}));}} style={{
+                  flex:1,padding:"7px 4px",borderRadius:8,border:"none",cursor:"pointer",
+                  background:addType===t?C.bgSurface:"transparent",
+                  color:addType===t?C.text:C.textMuted,
+                  fontSize:11,fontWeight:addType===t?700:400,
+                  transition:"all 0.12s",display:"flex",flexDirection:"column",alignItems:"center",gap:3,
+                }}>
+                  <span style={{fontSize:16}}>{ic}</span>
+                  <span>{l}</span>
+                </button>
+              ))}
+            </div>
+
+            {/* Title */}
+            <input autoFocus value={newItem.title||""}
+              onChange={e=>setNewItem(n=>({...n,title:e.target.value}))}
+              placeholder={addType==="task"?"What needs doing?":addType==="meeting"?"Meeting title…":"Reminder title…"}
+              style={{...inp,fontSize:14,padding:"10px 14px",marginBottom:14,fontWeight:600}}
+            />
+
+            {/* TASK */}
+            {addType==="task"&&(
+              <div style={{display:"flex",flexDirection:"column",gap:10}}>
                 <div style={{display:"flex",gap:8}}>
                   <select value={newItem.pillar||"film"} onChange={e=>setNewItem(n=>({...n,pillar:e.target.value,sub:""}))} style={{...inp,flex:1}}>
-                    {Object.entries(PILLARS).map(([pid,m])=><option key={pid} value={pid}>{m.icon} {m.label}</option>)}
+                    {Object.entries(PILLARS).filter(([pid])=>pid!=="parking").map(([pid,m])=><option key={pid} value={pid}>{m.icon} {m.label}</option>)}
                   </select>
                   <select value={newItem.priority||"High"} onChange={e=>setNewItem(n=>({...n,priority:e.target.value}))} style={{...inp,width:110}}>
                     {["High","Medium","Low"].map(p=><option key={p}>{p}</option>)}
@@ -1535,7 +1671,7 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
                 </div>
                 <div style={{display:"flex",gap:8}}>
                   <select value={newItem.sub||""} onChange={e=>setNewItem(n=>({...n,sub:e.target.value}))} style={{...inp,flex:1}}>
-                    <option value="">Select sub-pillar…</option>
+                    <option value="">Sub-pillar (optional)</option>
                     {allSubs(newItem.pillar||"film").map(s=><option key={s} value={s}>{s}</option>)}
                   </select>
                   <select value={newItem.status||"active"} onChange={e=>setNewItem(n=>({...n,status:e.target.value}))} style={{...inp,width:130}}>
@@ -1546,44 +1682,95 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
                 </div>
                 <div style={{display:"flex",gap:8,alignItems:"center"}}>
                   <label style={{fontSize:11,color:C.textMuted,whiteSpace:"nowrap"}}>Duration (min)</label>
-                  <input type="number" value={newItem.duration||60} min={15} step={15} onChange={e=>setNewItem(n=>({...n,duration:parseInt(e.target.value)||60}))} style={{...inp,width:70}}/>
-                  <label style={{fontSize:11,color:C.textMuted}}>Deadline</label>
+                  <input type="number" value={newItem.duration||60} min={15} step={15} onChange={e=>setNewItem(n=>({...n,duration:parseInt(e.target.value)||60}))} style={{...inp,width:75}}/>
+                  <label style={{fontSize:11,color:C.textMuted,whiteSpace:"nowrap"}}>Deadline</label>
                   <input type="date" value={newItem.deadline||""} onChange={e=>setNewItem(n=>({...n,deadline:e.target.value}))} style={{...inp,flex:1}}/>
                 </div>
-                {/* Optional: schedule immediately */}
+                <div style={{borderTop:`1px solid ${C.border}`,paddingTop:10}}>
+                  <div style={{fontSize:11,color:C.textMuted,marginBottom:7}}>Recurring</div>
+                  <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:newItem._recurring&&newItem._recurring!=="never"?8:0}}>
+                    {[["never","Never"],["daily","Daily"],["weekday","Weekdays"],["weekly","Weekly"],["weekend","Weekends"]].map(([v,l])=>(
+                      <button key={v} onClick={()=>setNewItem(n=>({...n,_recurring:v}))} style={{padding:"4px 10px",borderRadius:6,border:`1px solid ${(newItem._recurring||"never")===v?C.cyan:C.border}`,background:(newItem._recurring||"never")===v?`${C.cyan}18`:"transparent",color:(newItem._recurring||"never")===v?C.cyan:C.textMuted,fontSize:10,fontWeight:700,cursor:"pointer"}}>{l}</button>
+                    ))}
+                  </div>
+                  {newItem._recurring==="weekly"&&<DayPicker value={newItem._recurDays||[]} onChange={v=>setNewItem(n=>({...n,_recurDays:v}))} multi label="Repeat on"/>}
+                </div>
                 <div style={{borderTop:`1px solid ${C.border}`,paddingTop:10}}>
                   <label style={{display:"flex",alignItems:"center",gap:8,fontSize:11,color:C.textMuted,cursor:"pointer",marginBottom:newItem._scheduleNow?10:0}}>
                     <input type="checkbox" checked={!!newItem._scheduleNow} onChange={e=>setNewItem(n=>({...n,_scheduleNow:e.target.checked}))}/>
-                    Schedule this task now (skip AI scheduling)
+                    Schedule manually now
                   </label>
-                  {newItem._scheduleNow&&(
-                    <>
-                      <DayPicker value={newItem.dayOffset??0} onChange={v=>setNewItem(n=>({...n,dayOffset:v}))} label="Which day?"/>
-                      <div style={{display:"flex",gap:8,alignItems:"center",marginTop:6}}>
-                        <label style={{fontSize:11,color:C.textMuted,whiteSpace:"nowrap"}}>Time</label>
-                        <input type="time" defaultValue="09:00" onChange={e=>{const[h,m]=e.target.value.split(":").map(Number);setNewItem(n=>({...n,startHour:h,startMin:m}));}} style={{...inp,flex:1}}/>
-                      </div>
-                    </>
+                  {newItem._scheduleNow&&(<>
+                    <DayPicker value={newItem.dayOffset??0} onChange={v=>setNewItem(n=>({...n,dayOffset:v}))} label="Which day?"/>
+                    <div style={{display:"flex",gap:8,alignItems:"center",marginTop:8}}>
+                      <label style={{fontSize:11,color:C.textMuted,whiteSpace:"nowrap"}}>Time</label>
+                      <input type="time" defaultValue="09:00" onChange={e=>{const[h,m]=e.target.value.split(":").map(Number);setNewItem(n=>({...n,startHour:h,startMin:m}));}} style={{...inp,flex:1}}/>
+                    </div>
+                  </>)}
+                </div>
+                <textarea value={newItem.notes||""} onChange={e=>setNewItem(n=>({...n,notes:e.target.value}))} placeholder="Notes (optional)" rows={2} style={{...inp,resize:"none"}}/>
+              </div>
+            )}
+
+            {/* MEETING */}
+            {addType==="meeting"&&(
+              <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                <input value={newItem.attendees||""} onChange={e=>setNewItem(n=>({...n,attendees:e.target.value}))} placeholder="Participants (names or emails)" style={{...inp}}/>
+                <DayPicker value={newItem.dayOffset??0} onChange={v=>setNewItem(n=>({...n,dayOffset:v}))} label="Day"/>
+                <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                  <label style={{fontSize:11,color:C.textMuted,whiteSpace:"nowrap"}}>Time</label>
+                  <input type="time" defaultValue="09:00" onChange={e=>{const[h,m]=e.target.value.split(":").map(Number);setNewItem(n=>({...n,startHour:h,startMin:m}));}} style={{...inp,flex:1}}/>
+                  <label style={{fontSize:11,color:C.textMuted,whiteSpace:"nowrap"}}>Dur (min)</label>
+                  <input type="number" value={newItem.duration||60} min={15} step={15} onChange={e=>setNewItem(n=>({...n,duration:parseInt(e.target.value)||60}))} style={{...inp,width:75}}/>
+                </div>
+                <input value={newItem.location||""} onChange={e=>setNewItem(n=>({...n,location:e.target.value}))} placeholder="Location or link" style={{...inp}}/>
+                <div style={{borderTop:`1px solid ${C.border}`,paddingTop:10}}>
+                  <div style={{fontSize:11,color:C.textMuted,marginBottom:7}}>Recurring</div>
+                  <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:newItem._recurring&&newItem._recurring!=="never"?8:0}}>
+                    {[["never","Never"],["daily","Daily"],["weekday","Weekdays"],["weekly","Weekly"]].map(([v,l])=>(
+                      <button key={v} onClick={()=>setNewItem(n=>({...n,_recurring:v}))} style={{padding:"4px 10px",borderRadius:6,border:`1px solid ${(newItem._recurring||"never")===v?C.cyan:C.border}`,background:(newItem._recurring||"never")===v?`${C.cyan}18`:"transparent",color:(newItem._recurring||"never")===v?C.cyan:C.textMuted,fontSize:10,fontWeight:700,cursor:"pointer"}}>{l}</button>
+                    ))}
+                  </div>
+                  {newItem._recurring==="weekly"&&<DayPicker value={newItem._recurDays||[]} onChange={v=>setNewItem(n=>({...n,_recurDays:v}))} multi label="Repeat on"/>}
+                </div>
+                <textarea value={newItem.notes||""} onChange={e=>setNewItem(n=>({...n,notes:e.target.value}))} placeholder="Notes (optional)" rows={2} style={{...inp,resize:"none"}}/>
+              </div>
+            )}
+
+            {/* REMINDER */}
+            {addType==="reminder"&&(
+              <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                <DayPicker value={newItem.dayOffset??0} onChange={v=>setNewItem(n=>({...n,dayOffset:v}))} label="When?"/>
+                <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                  <label style={{fontSize:11,color:C.textMuted,whiteSpace:"nowrap"}}>Time</label>
+                  <input type="time" defaultValue="09:00" onChange={e=>{const[h,m]=e.target.value.split(":").map(Number);setNewItem(n=>({...n,startHour:h,startMin:m}));}} style={{...inp,flex:1}}/>
+                </div>
+                <div style={{background:C.bgSurface,border:`1px solid ${C.border}`,borderRadius:9,padding:"12px 14px"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:10,cursor:"pointer"}} onClick={()=>setNewItem(n=>({...n,_blockTime:!n._blockTime}))}>
+                    <div style={{width:36,height:20,borderRadius:10,background:newItem._blockTime?C.cyan:C.border,transition:"background 0.2s",position:"relative",flexShrink:0}}>
+                      <div style={{position:"absolute",top:2,left:newItem._blockTime?18:2,width:16,height:16,borderRadius:"50%",background:"#fff",transition:"left 0.2s"}}/>
+                    </div>
+                    <div>
+                      <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:2}}>Block time on calendar</div>
+                      <div style={{fontSize:10,color:C.textMuted,lineHeight:1.4}}>{newItem._blockTime?"Reserves this slot — nothing schedules here.":"Badge + slim line in Today view only. No time blocked."}</div>
+                    </div>
+                  </div>
+                  {newItem._blockTime&&(
+                    <div style={{display:"flex",gap:8,alignItems:"center",marginTop:10}}>
+                      <label style={{fontSize:11,color:C.textMuted,whiteSpace:"nowrap"}}>Duration (min)</label>
+                      <input type="number" value={newItem.duration||30} min={15} step={15} onChange={e=>setNewItem(n=>({...n,duration:parseInt(e.target.value)||30}))} style={{...inp,width:80}}/>
+                    </div>
                   )}
                 </div>
                 <textarea value={newItem.notes||""} onChange={e=>setNewItem(n=>({...n,notes:e.target.value}))} placeholder="Notes (optional)" rows={2} style={{...inp,resize:"none"}}/>
-              </>)}
-              {(addModal==="event"||addModal==="block")&&(<>
-                <DayPicker value={newItem.dayOffset??0} onChange={v=>setNewItem(n=>({...n,dayOffset:v}))} label="Which day?"/>
-                <div style={{display:"flex",gap:8,alignItems:"center",marginTop:4}}>
-                  <label style={{fontSize:11,color:C.textMuted,whiteSpace:"nowrap"}}>Time</label>
-                  <input type="time" defaultValue={`${String(newItem.startHour??9).padStart(2,"0")}:${String(newItem.startMin??0).padStart(2,"0")}`}
-                    onChange={e=>{const[h,m]=e.target.value.split(":").map(Number);setNewItem(n=>({...n,startHour:h,startMin:m}));}} style={{...inp,flex:1}}/>
-                  <label style={{fontSize:11,color:C.textMuted,whiteSpace:"nowrap"}}>Duration (min)</label>
-                  <input type="number" value={newItem.duration||60} min={15} step={15} onChange={e=>setNewItem(n=>({...n,duration:parseInt(e.target.value)||60}))} style={{...inp,width:80}}/>
-                </div>
-              </>)}
-            </div>
-            <div style={{display:"flex",gap:8,marginTop:16}}>
-              <button onClick={handleAdd} style={{background:`linear-gradient(135deg,${C.cyan},${C.cyanDim})`,color:C.bg,border:"none",borderRadius:8,padding:"9px 20px",fontSize:12,fontWeight:800,cursor:"pointer"}}>
-                {addModal==="task"?"Add Task":addModal==="event"?"Add Meeting":"Block Time"}
+              </div>
+            )}
+
+            <div style={{display:"flex",gap:8,marginTop:18,paddingTop:14,borderTop:`1px solid ${C.border}`}}>
+              <button onClick={handleAdd} style={{background:`linear-gradient(135deg,${C.cyan},${C.cyanDim})`,color:C.bg,border:"none",borderRadius:8,padding:"9px 24px",fontSize:13,fontWeight:800,cursor:"pointer"}}>
+                {addType==="task"?"Add Task":addType==="meeting"?"Add Meeting":"Set Reminder"}
               </button>
-              <button onClick={()=>setAddModal(null)} style={{...btn(C.bgSurface,C.textMuted,C.border)}}>Cancel</button>
+              <button onClick={()=>{setAddModal(false);setNewItem({});}} style={{...btn(C.bgSurface,C.textMuted,C.border)}}>Cancel</button>
             </div>
           </div>
         </div>
@@ -1616,23 +1803,46 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
         </div>
       )}
 
-      {/* ── ENERGY PROFILE MODAL ── */}
+      {/* ── ENERGY RHYTHM MODAL ── */}
       {energyModal&&(
         <div onClick={()=>setEnergyModal(false)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.65)",zIndex:150,display:"flex",alignItems:"center",justifyContent:"center"}}>
           <div onClick={e=>e.stopPropagation()} style={{background:C.bgCard,borderRadius:16,padding:24,width:420,boxShadow:`0 24px 60px rgba(0,0,0,0.7),0 0 0 1px ${C.border}`}}>
-            <h3 style={{margin:"0 0 6px",fontSize:15,fontWeight:800,color:C.text}}>Energy Profile</h3>
-            <div style={{fontSize:11,color:C.textMuted,marginBottom:16}}>Rate your typical energy at each hour (1–10). AI uses this to schedule high-priority work during your peak hours.</div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,maxHeight:320,overflowY:"auto"}}>
-              {Object.entries(energyProfile).sort((a,b)=>+a[0]-+b[0]).map(([h,e])=>(
-                <div key={h} style={{display:"flex",alignItems:"center",gap:8}}>
-                  <span style={{fontSize:11,color:C.textMuted,width:46,flexShrink:0}}>{fmtT(+h,0)}</span>
-                  <input type="range" min={1} max={10} value={e} onChange={ev=>setEnergyProfile(p=>({...p,[h]:+ev.target.value}))} style={{flex:1}}/>
-                  <EnergyDot level={e}/>
-                  <span style={{fontSize:10,color:C.textMuted,width:14}}>{e}</span>
+            <h3 style={{margin:"0 0 6px",fontSize:15,fontWeight:800,color:C.text}}>⚡ Energy Rhythm</h3>
+            <div style={{fontSize:11,color:C.textMuted,marginBottom:20,lineHeight:1.5}}>
+              Tell Compass when you have the most energy. AI scheduling places high-priority tasks in your peak periods.
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:12}}>
+              {Object.entries(energyRhythm).map(([period,data])=>(
+                <div key={period}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                    <div>
+                      <div style={{fontSize:12,fontWeight:700,color:C.text}}>{data.label}</div>
+                      <div style={{fontSize:10,color:C.textFaint}}>{data.hours}</div>
+                    </div>
+                    <div style={{display:"flex",gap:5}}>
+                      {["low","medium","high","peak"].map(level=>{
+                        const colors={low:C.textFaint,medium:C.medium,high:C.low,peak:C.cyan};
+                        const labels={low:"Low",medium:"Medium",high:"High",peak:"Peak"};
+                        const active=data.level===level;
+                        return(
+                          <button key={level} onClick={()=>setEnergyRhythm(p=>({...p,[period]:{...p[period],level}}))} style={{
+                            padding:"4px 10px",borderRadius:6,fontSize:10,fontWeight:active?800:400,cursor:"pointer",border:"none",
+                            background:active?`${colors[level]}22`:"transparent",
+                            color:active?colors[level]:C.textFaint,
+                            outline:active?`1.5px solid ${colors[level]}`:"none",
+                            transition:"all 0.12s"
+                          }}>{labels[level]}</button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div style={{height:3,background:C.border,borderRadius:2,overflow:"hidden"}}>
+                    <div style={{height:"100%",width:data.level==="peak"?"100%":data.level==="high"?"75%":data.level==="medium"?"45%":"20%",background:data.level==="peak"?C.cyan:data.level==="high"?C.low:data.level==="medium"?C.medium:C.textFaint,borderRadius:2,transition:"width 0.3s"}}/>
+                  </div>
                 </div>
               ))}
             </div>
-            <button onClick={()=>setEnergyModal(false)} style={{marginTop:16,background:`linear-gradient(135deg,${C.cyan},${C.cyanDim})`,color:C.bg,border:"none",borderRadius:8,padding:"9px 20px",fontSize:12,fontWeight:800,cursor:"pointer"}}>Save Profile</button>
+            <button onClick={()=>setEnergyModal(false)} style={{marginTop:20,background:`linear-gradient(135deg,${C.cyan},${C.cyanDim})`,color:C.bg,border:"none",borderRadius:8,padding:"9px 20px",fontSize:12,fontWeight:800,cursor:"pointer"}}>Save Rhythm</button>
           </div>
         </div>
       )}
