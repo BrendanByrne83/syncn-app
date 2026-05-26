@@ -1,13 +1,31 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 
 // ─── BRAND & PILLARS ──────────────────────────────────────────────────────────
-const C = {
-  bg:"#0b1220",bgCard:"#121b2e",bgSurface:"#1a2540",bgHover:"#1e2d47",
-  border:"#1a2540",borderLight:"#111827",
-  text:"#eef2ff",textMuted:"#64748b",textFaint:"#2d3a52",
-  cyan:"#00b4d8",cyanDim:"#0090b0",cyanGlow:"#00b4d815",
-  high:"#e05c5c",medium:"#d4a843",low:"#4db88a",
+// ─── THEME SYSTEM ─────────────────────────────────────────────────────────────
+const THEMES = {
+  dark: {
+    bg:"#0b1220",bgCard:"#121b2e",bgSurface:"#1a2540",bgHover:"#1e2d47",
+    border:"#1a2540",borderLight:"#111827",
+    text:"#eef2ff",textMuted:"#64748b",textFaint:"#2d3a52",
+    cyan:"#00b4d8",cyanDim:"#0090b0",cyanGlow:"#00b4d815",cyanBright:"#38d4f5",
+    high:"#e05c5c",medium:"#d4a843",low:"#4db88a",done:"#4db88a",parked:"#4a7fa0",
+  },
+  light: {
+    bg:"#f0f4fb",bgCard:"#ffffff",bgSurface:"#e8edf8",bgHover:"#dde4f2",
+    border:"#cdd5e8",borderLight:"#e0e6f0",
+    text:"#1a2540",textMuted:"#5a6e8a",textFaint:"#9aaac0",
+    cyan:"#0090b0",cyanDim:"#007890",cyanGlow:"#00b4d815",cyanBright:"#007890",
+    high:"#c94040",medium:"#a07010",low:"#2a7a50",done:"#2a7a50",parked:"#3a6080",
+  },
 };
+
+function loadTheme() {
+  return localStorage.getItem("syncn_theme") === "light" ? "light" : "dark";
+}
+
+// Module-level C — updated when theme toggles via forceUpdate
+let C = THEMES[loadTheme()];
+
 
 const DEFAULT_PILLARS = {
   family:    { label:"Family",       icon:"👨‍👩‍👧‍👦", color:"#e8a87c", sub:["Madden","Hardey","Noa","Relationship","Home"] },
@@ -374,7 +392,7 @@ function DayPicker({value, onChange, multi=false, label="Day", showDateInput=fal
     const DAYS = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
     return (
       <div>
-        <div style={{fontSize:11,color:"#6b7fa3",marginBottom:6}}>{label}</div>
+        <div style={{fontSize:11,color:C.textMuted,marginBottom:6}}>{label}</div>
         <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
           {DAYS.map((d,i)=>{
             const active = Array.isArray(value) && value.includes(i);
@@ -392,7 +410,7 @@ function DayPicker({value, onChange, multi=false, label="Day", showDateInput=fal
             );
           })}
         </div>
-        <div style={{fontSize:10,color:"#3a4a6a",marginTop:5}}>Tap to toggle. Multiple days supported.</div>
+        <div style={{fontSize:10,color:C.textFaint,marginTop:5}}>Tap to toggle. Multiple days supported.</div>
       </div>
     );
   }
@@ -410,7 +428,7 @@ function DayPicker({value, onChange, multi=false, label="Day", showDateInput=fal
 
   return (
     <div>
-      <div style={{fontSize:11,color:"#6b7fa3",marginBottom:6}}>{label}</div>
+      <div style={{fontSize:11,color:C.textMuted,marginBottom:6}}>{label}</div>
       <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:showDateInput?8:0}}>
         {days.map(d=>{
           const active = value===d.offset;
@@ -452,7 +470,7 @@ function Logo({size=24}){
   return(
     <svg width={size} height={size} viewBox="0 0 40 40" fill="none">
       <defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1">
-        <stop offset="0%" stopColor="#fff"/><stop offset="55%" stopColor="#38d4f5"/><stop offset="100%" stopColor="#006d99"/>
+        <stop offset="0%" stopColor="#38d4f5"/><stop offset="55%" stopColor="#00b4d8"/><stop offset="100%" stopColor="#006d99"/>
       </linearGradient></defs>
       <text x="3" y="31" fontSize="33" fontWeight="900" fill="url(#lg)" fontFamily="Georgia,serif">S</text>
     </svg>
@@ -509,7 +527,7 @@ function PillarRing({pillar,pid,tasks,onSelect,selected}){
 // "reminder"  = reminder (dashed border, no fill)
 // "block"     = manually blocked time (muted)
 
-function CalBlock({item,color,onClick,col=0,cols=1,isTask=false,blockType="scheduled"}){
+function CalBlock({item,color,onClick,col=0,cols=1,isTask=false,blockType="scheduled",isDark=true}){
   const top=px(item.startHour,item.startMin);
   const height=Math.max(pxH(item.duration||30)-2,16);
 
@@ -519,7 +537,7 @@ function CalBlock({item,color,onClick,col=0,cols=1,isTask=false,blockType="sched
     recurring: {bg:`${color}10`,border:`1.5px solid ${color}50`,opacity:0.9},
     habit:     {bg:`${color}18`,border:`1.5px solid ${color}`,opacity:1},
     reminder:  {bg:"transparent",border:`1.5px dashed ${color}60`,opacity:0.8},
-    block:     {bg:"#333a4a",border:`1px solid #445`,opacity:0.7},
+    block:     {bg:isDark?"#333a4a":"#c8d0e0",border:`1px solid ${isDark?"#445":"#a0b0c8"}`,opacity:0.85},
   };
   const s = styles[blockType] || styles.scheduled;
 
@@ -547,6 +565,15 @@ function CalBlock({item,color,onClick,col=0,cols=1,isTask=false,blockType="sched
 export default function Syncn(){
   const [tasks,setTasks]=useState(loadTasks);
   const [gcalEvents,setGcalEvents]=useState(INIT_GCAL);
+  const [theme,setTheme]=useState(loadTheme);
+  // Keep module-level C in sync with React state
+  C = THEMES[theme];
+  const toggleTheme = () => {
+    const next = theme === "dark" ? "light" : "dark";
+    setTheme(next);
+    localStorage.setItem("syncn_theme", next);
+    C = THEMES[next];
+  };
   const [screen,setScreen]=useState("today");
   const [todayView,setTodayView]=useState("day"); // day | week
   const [openAccordion,setOpenAccordion]=useState("morning"); // which period is open
@@ -1435,6 +1462,13 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
             + Add
           </button>
 
+          {/* Theme toggle */}
+          <button onClick={toggleTheme} title={theme==="dark"?"Switch to light theme":"Switch to dark theme"}
+            style={{background:"none",border:`1px solid ${C.border}`,borderRadius:8,padding:"6px 10px",cursor:"pointer",color:C.textMuted,fontSize:13,lineHeight:1,transition:"all 0.2s"}}
+            onMouseEnter={e=>e.currentTarget.style.borderColor=C.cyan}
+            onMouseLeave={e=>e.currentTarget.style.borderColor=C.border}
+          >{theme==="dark"?"☀️":"🌙"}</button>
+
           {/* Overflow menu */}
           <div style={{position:"relative"}}>
             <button onClick={()=>setOverflowOpen(o=>!o)} style={{background:"none",border:`1px solid ${C.border}`,borderRadius:8,padding:"6px 10px",cursor:"pointer",color:C.textMuted,fontSize:13,lineHeight:1}}>⋮</button>
@@ -2121,7 +2155,7 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
                             :item._isTask?"scheduled"
                             :"locked";
                           return(
-                            <CalBlock key={item.id} item={item} color={color} col={item.col} cols={item.cols} isTask={item._isTask} blockType={blockType}
+                            <CalBlock key={item.id} item={item} color={color} col={item.col} cols={item.cols} isTask={item._isTask} blockType={blockType} isDark={theme==="dark"}
                               onClick={()=>{
                                 if(item._isRecurring){
                                   const rt=recurringTasks.find(r=>r.id===item.recurringId);
@@ -2175,7 +2209,7 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
               <div style={{flex:1,overflowY:"auto",padding:"16px 20px",display:"flex",flexDirection:"column",gap:10}}>
                 {compassMsgs.length===0&&(
                   <div style={{textAlign:"center",padding:"40px 20px"}}>
-                    <div style={{fontSize:32,marginBottom:12,filter:`drop-shadow(0 0 12px ${C.cyan})`}}>✦</div>
+                    <div style={{fontSize:32,marginBottom:12,filter:`drop-shadow(0 0 10px ${C.cyan})`}}>✦</div>
                     <div style={{fontSize:14,fontWeight:600,color:C.text,marginBottom:6}}>Compass</div>
                     <div style={{fontSize:12,color:C.textMuted,marginBottom:20,lineHeight:1.6,maxWidth:420,margin:"0 auto 20px"}}>Your AI life alignment coach. Knows your pillars, your schedule, your patterns. Doesn't sugarcoat.</div>
                     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,maxWidth:480,margin:"0 auto"}}>
@@ -3313,6 +3347,7 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
         ::-webkit-scrollbar-thumb{background:${C.border};border-radius:8px}
         option{background:${C.bgCard};color:${C.text}}
         input[type=range]{accent-color:${C.cyan}}
+        input,select,textarea{color-scheme:${theme==='light'?'light':'dark'}}
       `}</style>
     </div>
   );
