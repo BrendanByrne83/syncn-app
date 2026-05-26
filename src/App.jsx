@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 
 // ─── BRAND & PILLARS ──────────────────────────────────────────────────────────
 const C = {
-  bg:"#080c17",bgCard:"#0d1220",bgSurface:"#111827",bgHover:"#171f30",
+  bg:"#0b1220",bgCard:"#121b2e",bgSurface:"#1a2540",bgHover:"#1e2d47",
   border:"#1a2540",borderLight:"#111827",
   text:"#eef2ff",textMuted:"#64748b",textFaint:"#2d3a52",
   cyan:"#00b4d8",cyanDim:"#0090b0",cyanGlow:"#00b4d815",
@@ -480,22 +480,42 @@ function PillarRing({pillar,pid,tasks,onSelect,selected}){
 }
 
 // ─── CALENDAR BLOCK ───────────────────────────────────────────────────────────
-function CalBlock({item,color,onClick,col=0,cols=1,isTask=false}){
+// Block types for visual hierarchy:
+// "locked"    = calendar events (immovable — bright, solid)
+// "scheduled" = AI-scheduled tasks (softer background)
+// "recurring" = recurring events (medium)
+// "habit"     = habit-type recurring (pill style)
+// "reminder"  = reminder (dashed border, no fill)
+// "block"     = manually blocked time (muted)
+
+function CalBlock({item,color,onClick,col=0,cols=1,isTask=false,blockType="scheduled"}){
   const top=px(item.startHour,item.startMin);
   const height=Math.max(pxH(item.duration||30)-2,16);
+
+  const styles = {
+    locked:    {bg:`${color}28`,border:`2px solid ${color}`,opacity:1},
+    scheduled: {bg:`${color}14`,border:`1.5px solid ${color}60`,opacity:1},
+    recurring: {bg:`${color}10`,border:`1.5px solid ${color}50`,opacity:0.9},
+    habit:     {bg:`${color}18`,border:`1.5px solid ${color}`,opacity:1},
+    reminder:  {bg:"transparent",border:`1.5px dashed ${color}60`,opacity:0.8},
+    block:     {bg:"#333a4a",border:`1px solid #445`,opacity:0.7},
+  };
+  const s = styles[blockType] || styles.scheduled;
+
   return(
     <div onClick={e=>{e.stopPropagation();onClick();}} style={{
       position:"absolute",
       top,left:`calc(${(col/cols)*100}% + 2px)`,
       width:`calc(${100/cols}% - 4px)`,height,
-      background:`${color}1a`,borderLeft:`2px solid ${color}`,
-      borderRadius:5,padding:"2px 5px",cursor:"pointer",overflow:"hidden",zIndex:2+col,
-      transition:"background 0.12s",boxSizing:"border-box",
+      background:s.bg,border:s.border,
+      borderRadius:5,padding:"2px 6px",cursor:"pointer",overflow:"hidden",
+      zIndex:2+col,transition:"opacity 0.12s",boxSizing:"border-box",
+      opacity:s.opacity,
     }}
-    onMouseEnter={e=>e.currentTarget.style.background=`${color}35`}
-    onMouseLeave={e=>e.currentTarget.style.background=`${color}1a`}>
-      <div style={{fontSize:9,fontWeight:700,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",lineHeight:1.3}}>
-        {isTask?"⬡ ":""}{item.title}
+    onMouseEnter={e=>e.currentTarget.style.opacity="1"}
+    onMouseLeave={e=>e.currentTarget.style.opacity=String(s.opacity)}>
+      <div style={{fontSize:9,fontWeight:blockType==="locked"?700:600,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",lineHeight:1.3}}>
+        {item.title}
       </div>
       {height>28&&<div style={{fontSize:8,color:C.textMuted}}>{fmtT(item.startHour,item.startMin)}{item.duration?` · ${fmtD(item.duration)}`:""}</div>}
     </div>
@@ -506,7 +526,10 @@ function CalBlock({item,color,onClick,col=0,cols=1,isTask=false}){
 export default function Syncn(){
   const [tasks,setTasks]=useState(loadTasks);
   const [gcalEvents,setGcalEvents]=useState(INIT_GCAL);
-  const [screen,setScreen]=useState("mission"); // mission|today|lifemap|calendar|compass
+  const [screen,setScreen]=useState("today");
+  const [todayView,setTodayView]=useState("day"); // day | week
+  const [openAccordion,setOpenAccordion]=useState("morning"); // which period is open
+  const [overflowOpen,setOverflowOpen]=useState(false); // mission|today|lifemap|calendar|compass
   const [weekOffset,setWeekOffset]=useState(0);
   const [selectedPillar,setSelectedPillar]=useState(null);
   const [selectedSub,setSelectedSub]=useState(null);
@@ -578,7 +601,7 @@ export default function Syncn(){
     setHiddenEvents(updated);
     localStorage.setItem("syncn_hidden_events", JSON.stringify(updated));
   };
-  const [showHiddenModal,setShowHiddenModal]=useState(false);
+  const [showIgnoredModal,setShowIgnoredModal]=useState(false);
   const [calLoading,setCalLoading]=useState(false);
   const [calError,setCalError]=useState(null);
   const [scheduling,setScheduling]=useState(false);
@@ -1257,62 +1280,85 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
 
       {/* ── NAV BAR ── */}
       {/* TOP BAR */}
-      <div style={{background:C.bgCard,borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"center",padding:"0 12px",height:48,gap:8,flexShrink:0,zIndex:20}}>
-        {/* Hamburger */}
-        <button
-          onClick={()=>setSidebarMode(m=>m==="expanded"?"collapsed":m==="collapsed"?"hidden":"expanded")}
-          title={sidebarMode==="expanded"?"Collapse sidebar":sidebarMode==="collapsed"?"Hide sidebar":"Expand sidebar"}
-          style={{background:"none",border:"none",cursor:"pointer",padding:"5px 6px",borderRadius:6,color:C.textMuted,fontSize:15,lineHeight:1,flexShrink:0,transition:"color 0.15s"}}
-          onMouseEnter={e=>e.currentTarget.style.color=C.text}
-          onMouseLeave={e=>e.currentTarget.style.color=C.textMuted}
-        >{sidebarMode==="hidden"?"▶":"☰"}</button>
+      <div style={{background:C.bgCard,borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"center",padding:"0 20px",height:52,gap:0,flexShrink:0,zIndex:20}}>
 
-        <div style={{display:"flex",alignItems:"center",gap:6,marginRight:6}}>
-          <Logo size={22}/>
-          <span style={{fontSize:13,fontWeight:800,letterSpacing:-0.5}}>Sync<span style={{color:C.cyan}}>'n</span></span>
+        {/* Left: logo + nav */}
+        <div style={{display:"flex",alignItems:"center",gap:0,flex:1}}>
+          <button onClick={()=>setSidebarMode(m=>m==="expanded"?"collapsed":m==="collapsed"?"hidden":"expanded")}
+            style={{background:"none",border:"none",cursor:"pointer",padding:"6px 8px 6px 0",color:C.textMuted,fontSize:15,lineHeight:1,marginRight:8}}
+          >{sidebarMode==="hidden"?"▶":"☰"}</button>
+
+          <div style={{display:"flex",alignItems:"center",gap:6,marginRight:24}}>
+            <Logo size={22}/>
+            <span style={{fontSize:13,fontWeight:800,letterSpacing:-0.5,color:C.text}}>Sync<span style={{color:C.cyan}}>'n</span></span>
+          </div>
+
+          {/* Nav tabs */}
+          <div style={{display:"flex",gap:1}}>
+            {[["today","Today"],["calendar","Calendar"],["lifemap","Life Map"],["compass","✦ Compass"]].map(([s,l])=>(
+              <button key={s} onClick={()=>setScreen(s)} style={{
+                padding:"6px 14px",background:"none",border:"none",cursor:"pointer",
+                fontSize:12,fontWeight:screen===s?700:400,
+                color:screen===s?(s==="compass"?C.cyan:C.text):C.textMuted,
+                borderBottom:screen===s?`2px solid ${s==="compass"?C.cyan:C.cyan}`:"2px solid transparent",
+                transition:"all 0.15s",marginBottom:-1,
+              }}>{l}</button>
+            ))}
+          </div>
         </div>
 
-        {/* Nav tabs */}
-        <div style={{display:"flex",gap:1,background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:2}}>
-          {[["mission","⚡","Mission"],["today","📋","Today"],["lifemap","🗺","Life Map"],["calendar","📅","Calendar"],["compass","✦","Compass"]].map(([s,ic,l])=>(
-            <button key={s} onClick={()=>setScreen(s)} style={{
-              padding:"4px 9px",borderRadius:6,border:"none",cursor:"pointer",fontSize:11,fontWeight:700,
-              background:screen===s?C.bgSurface:"transparent",
-              color:screen===s?(s==="compass"?C.cyan:C.text):C.textMuted,
-              boxShadow:screen===s&&s==="compass"?`0 0 8px ${C.cyanGlow}`:"none",
-              transition:"all 0.12s",whiteSpace:"nowrap",
-            }}>{ic} {l}</button>
-          ))}
-        </div>
+        {/* Right: primary actions only */}
+        <div style={{display:"flex",gap:8,alignItems:"center"}}>
+          {/* Sync status */}
+          <div style={{display:"flex",alignItems:"center",gap:5,fontSize:10,color:C.textMuted,marginRight:4}}>
+            <span style={{width:5,height:5,borderRadius:"50%",background:calLoading?C.medium:calError?C.high:C.done}}/>
+            <button onClick={syncCalendar} disabled={calLoading} style={{background:"none",border:"none",cursor:"pointer",color:C.textMuted,fontSize:10,padding:0}}>
+              {calLoading?"Syncing…":"↻ Sync"}
+            </button>
+          </div>
 
-        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search…"
-          style={{...inp,width:130,border:`1px solid ${C.border}`}}/>
-
-        <div style={{marginLeft:"auto",display:"flex",gap:6,alignItems:"center"}}>
-          {warnings.length>0&&(
-            <div style={{fontSize:10,color:C.medium,background:`${C.medium}12`,border:`1px solid ${C.medium}40`,borderRadius:6,padding:"3px 8px",whiteSpace:"nowrap"}}>
-              ⚠ {warnings[0].meta.label}
-            </div>
-          )}
-          <button onClick={syncCalendar} disabled={calLoading}
-            style={{...btn(calLoading?C.bgSurface:`${C.cyan}14`,calLoading?C.textMuted:C.cyan,calLoading?C.border:C.cyanDim),fontSize:10}}>
-            {calLoading?"⟳":"↻"} Sync
-          </button>
+          {/* Schedule */}
           {unscheduled.filter(t=>t.priority!=="Low").length>0&&(
-            <button onClick={autoSchedule} disabled={scheduling}
-              style={{...btn(scheduling?C.bgSurface:`${C.cyan}14`,scheduling?C.textMuted:C.cyan,C.cyanDim),fontSize:10}}>
-              {scheduling?"⟳":`✦ AI (${unscheduled.filter(t=>t.priority!=="Low").length})`}
+            <button onClick={autoSchedule} disabled={scheduling} style={{
+              background:scheduling?C.bgSurface:`${C.cyan}15`,color:scheduling?C.textMuted:C.cyan,
+              border:`1px solid ${scheduling?C.border:C.cyanDim}`,borderRadius:8,
+              padding:"5px 14px",fontSize:11,fontWeight:700,cursor:"pointer",
+              display:"flex",alignItems:"center",gap:5,
+            }}>
+              {scheduling?"Scheduling…":"✨ Schedule"}
             </button>
           )}
-          <button
-            onClick={()=>{
-              setAddType("task");
-              setNewItem({pillar:"film",sub:"",title:"",priority:"High",duration:60,status:"active",notes:"",deadline:"",_recurring:"never",_scheduleNow:false});
-              setAddModal(true);
-            }}
-            style={{background:`linear-gradient(135deg,${C.cyan},${C.cyanDim})`,color:"#000",border:"none",borderRadius:7,padding:"5px 18px",fontSize:12,fontWeight:800,cursor:"pointer"}}>
+
+          {/* Add */}
+          <button onClick={()=>{setAddType("task");setNewItem({pillar:"film",sub:"",title:"",priority:"High",duration:60,status:"active",notes:"",deadline:"",_recurring:"never",_scheduleNow:false});setAddModal(true);}}
+            style={{background:`linear-gradient(135deg,${C.cyan},${C.cyanDim})`,color:"#000",border:"none",borderRadius:8,padding:"6px 16px",fontSize:12,fontWeight:800,cursor:"pointer"}}>
             + Add
           </button>
+
+          {/* Overflow menu */}
+          <div style={{position:"relative"}}>
+            <button onClick={()=>setOverflowOpen(o=>!o)} style={{background:"none",border:`1px solid ${C.border}`,borderRadius:8,padding:"6px 10px",cursor:"pointer",color:C.textMuted,fontSize:13,lineHeight:1}}>⋮</button>
+            {overflowOpen&&(
+              <div onClick={()=>setOverflowOpen(false)} style={{position:"fixed",inset:0,zIndex:40}} />
+            )}
+            {overflowOpen&&(
+              <div style={{position:"absolute",right:0,top:"calc(100% + 6px)",background:C.bgCard,border:`1px solid ${C.border}`,borderRadius:10,padding:"6px",minWidth:180,zIndex:50,boxShadow:"0 8px 24px rgba(0,0,0,0.3)"}}>
+                {[
+                  {label:"Plan Tomorrow", action:()=>{setEveningPlanModal(true);setOverflowOpen(false);}},
+                  {label:"Re-sync Today", action:()=>{resyncToday();setOverflowOpen(false);}},
+                  {label:"Archive ("+(archive.length)+")", action:()=>{setShowArchive(true);setOverflowOpen(false);}},
+                  {label:"Add Recurring", action:()=>{setAddType("recurring");setNewItem({pillar:"film",sub:"",title:"",priority:"Medium",duration:60,status:"active",notes:"",_recurring:"weekly",_recurDays:[]});setAddModal(true);setOverflowOpen(false);}},
+                  {label:`Ignored (${hiddenEvents.length})`, action:()=>{setShowIgnoredModal(true);setOverflowOpen(false);}},
+                  {label:"Energy Rhythm", action:()=>{setEnergyModal(true);setOverflowOpen(false);}},
+                ].map(item=>(
+                  <button key={item.label} onClick={item.action} style={{display:"block",width:"100%",textAlign:"left",padding:"8px 12px",background:"none",border:"none",cursor:"pointer",color:C.text,fontSize:12,borderRadius:6}}
+                    onMouseEnter={e=>e.currentTarget.style.background=C.bgSurface}
+                    onMouseLeave={e=>e.currentTarget.style.background="none"}
+                  >{item.label}</button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -1431,237 +1477,244 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
         {/* MAIN CONTENT */}
         <div style={{flex:1,overflow:"hidden",display:"flex",flexDirection:"column"}}>
 
-          {/* ══ MISSION CONTROL ══════════════════════════════════════════════ */}
-          {screen==="mission"&&(
-            <div style={{flex:1,overflowY:"auto",padding:"28px 32px"}}>
-              <div style={{maxWidth:820,margin:"0 auto"}}>
-                {/* Header */}
+          {/* ══ TODAY ══════════════════════════════════════════════════════════ */}
+          {screen==="today"&&(
+            <div style={{flex:1,overflowY:"auto"}} onClick={()=>overflowOpen&&setOverflowOpen(false)}>
+              <div style={{maxWidth:720,margin:"0 auto",padding:"28px 24px"}}>
+
+                {/* Greeting + stats */}
                 <div style={{marginBottom:28}}>
-                  <div style={{fontSize:11,color:C.textMuted,letterSpacing:1,textTransform:"uppercase",marginBottom:6}}>
-                    {new Date().toLocaleDateString("en-AU",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}
+                  <div style={{fontSize:12,color:C.textMuted,marginBottom:6,letterSpacing:0.3}}>
+                    {new Date().toLocaleDateString("en-AU",{weekday:"long",day:"numeric",month:"long"})}
                   </div>
-                  <h1 style={{margin:0,fontSize:28,fontWeight:800,letterSpacing:-1,color:C.text,lineHeight:1.1}}>
+                  <h1 style={{margin:"0 0 10px",fontSize:26,fontWeight:800,letterSpacing:-0.8,color:C.text,lineHeight:1.1}}>
                     Good {new Date().getHours()<12?"morning":new Date().getHours()<17?"afternoon":"evening"}, Brendan.
                   </h1>
-                  <div style={{fontSize:13,color:C.textMuted,marginTop:6,display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
-                    <span>{unscheduled.filter(t=>t.priority==="High").length} urgent · {todayAll.length} today · {gcalEvents.length} calendar events</span>
-                    <div style={{marginLeft:"auto",display:"flex",gap:7}}>
-                      <button onClick={()=>setShowArchive(true)} style={{...btn(C.bgSurface,C.textMuted,C.border),fontSize:10}}>📦 Archive{archive.length>0?` (${archive.length})`:""}</button>
-                      <button onClick={()=>setEveningPlanModal(true)} style={{...btn(`${C.cyan}18`,C.cyan,C.cyanDim),fontSize:10}}>{isMonday?"✦ Plan Week":"✦ Plan Tomorrow"}</button>
-                    </div>
+                  <div style={{display:"flex",alignItems:"center",gap:16,fontSize:12,color:C.textMuted}}>
+                    {unscheduled.filter(t=>t.priority==="High").length>0&&(
+                      <span><strong style={{color:C.high}}>{unscheduled.filter(t=>t.priority==="High").length}</strong> urgent</span>
+                    )}
+                    <span><strong style={{color:C.text}}>{todayAll.length}</strong> scheduled today</span>
+                    {gcalEvents.filter(e=>e.dayOffset===0).length>0&&(
+                      <span><strong style={{color:C.cyan}}>{gcalEvents.filter(e=>e.dayOffset===0).length}</strong> calendar events</span>
+                    )}
                   </div>
                 </div>
 
-                {/* Start briefing CTA */}
-                {!briefingDone&&(
-                  <div style={{background:`linear-gradient(135deg,${C.bgCard},${C.bgSurface})`,border:`1px solid ${C.border}`,borderRadius:14,padding:"22px 24px",marginBottom:24,position:"relative",overflow:"hidden"}}>
-                    <div style={{position:"absolute",top:0,left:0,right:0,height:2,background:`linear-gradient(90deg,${C.cyan},${PILLARS.film.color})`}}/>
-                    <div style={{fontSize:11,color:C.cyan,fontWeight:700,letterSpacing:0.5,textTransform:"uppercase",marginBottom:8}}>✦ Daily Briefing Ready</div>
-                    <div style={{fontSize:15,fontWeight:600,color:C.text,marginBottom:14}}>Compass has analysed your day. Start your morning briefing.</div>
-                    <button onClick={startMorningBriefing} style={{background:`linear-gradient(135deg,${C.cyan},${C.cyanDim})`,color:"#000",border:"none",borderRadius:8,padding:"9px 20px",fontSize:12,fontWeight:800,cursor:"pointer"}}>
-                      Start Morning Briefing →
+                {/* Day / Week toggle */}
+                <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:24}}>
+                  <div style={{display:"flex",background:C.bgSurface,borderRadius:8,padding:2,gap:1}}>
+                    {[["day","Day"],["week","Week"]].map(([v,l])=>(
+                      <button key={v} onClick={()=>setTodayView(v)} style={{
+                        padding:"5px 16px",borderRadius:6,border:"none",cursor:"pointer",fontSize:11,fontWeight:700,
+                        background:todayView===v?C.bgCard:"transparent",
+                        color:todayView===v?C.text:C.textMuted,
+                        transition:"all 0.12s",
+                      }}>{l}</button>
+                    ))}
+                  </div>
+                  {unscheduled.filter(t=>t.priority!=="Low").length>0&&(
+                    <button onClick={autoSchedule} disabled={scheduling} style={{fontSize:11,background:`${C.cyan}15`,color:C.cyan,border:`1px solid ${C.cyanDim}`,borderRadius:8,padding:"5px 14px",cursor:"pointer",fontWeight:700}}>
+                      {scheduling?"Scheduling…":"✨ Schedule My Day"}
                     </button>
-                  </div>
-                )}
-
-                {/* Stats grid */}
-                <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:24}}>
-                  {[
-                    {label:"Urgent Unscheduled",value:unscheduled.filter(t=>t.priority==="High").length,color:C.high,sub:"Need time blocks"},
-                    {label:"Today's Tasks",value:todayTasks.length,color:C.cyan,sub:"Scheduled today"},
-                    {label:"Meetings Today",value:todayEvents.length,color:PILLARS.family.color,sub:"Calendar events"},
-                    {label:"Life Pillars",value:Object.keys(PILLARS).length-1,color:PILLARS.growth.color,sub:`${warnings.length} need attention`},
-                  ].map(s=>(
-                    <div key={s.label} style={{background:C.bgCard,border:`1px solid ${C.border}`,borderRadius:11,padding:"14px 16px"}}>
-                      <div style={{fontSize:24,fontWeight:800,color:s.color,marginBottom:2}}>{s.value}</div>
-                      <div style={{fontSize:11,color:C.text,fontWeight:600}}>{s.label}</div>
-                      <div style={{fontSize:10,color:C.textMuted,marginTop:2}}>{s.sub}</div>
-                    </div>
-                  ))}
+                  )}
                 </div>
 
-                {/* TODAY'S SCHEDULE — split Morning / Afternoon / Evening */}
-                {(()=>{
+                {/* ── DAY VIEW ── */}
+                {todayView==="day"&&(()=>{
                   const periods=[
-                    {label:"Morning",icon:"🌅",from:0,to:12,color:"#e8a87c"},
-                    {label:"Afternoon",icon:"☀️",from:12,to:17,color:C.cyan},
-                    {label:"Evening",icon:"🌙",from:17,to:24,color:"#9b6dce"},
+                    {id:"morning",label:"Morning",icon:"🌅",from:0,to:12},
+                    {id:"afternoon",label:"Afternoon",icon:"☀️",from:12,to:17},
+                    {id:"evening",label:"Evening",icon:"🌙",from:17,to:24},
                   ];
-                  const hasAny=todayAll.length>0;
+                  const now=new Date();
+
                   return(
-                    <div style={{marginBottom:24}}>
-                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-                        <div style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",letterSpacing:0.5}}>Today's Schedule</div>
-                        <button onClick={()=>setScreen("today")} style={{fontSize:10,color:C.cyan,background:"none",border:"none",cursor:"pointer",fontWeight:600}}>Full view →</button>
-                      </div>
-                      {!hasAny?(
-                        <div style={{background:C.bgCard,border:`1px solid ${C.border}`,borderRadius:10,padding:"20px",textAlign:"center",color:C.textFaint,fontSize:12}}>
-                          Nothing scheduled today.{unscheduled.length>0?" Hit AI Schedule to fill your day.":""}
-                        </div>
-                      ):(
-                        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12}}>
-                          {periods.map(period=>{
-                            const items=todayAll.filter(i=>i.startHour>=period.from&&i.startHour<period.to);
-                            return(
-                              <div key={period.label} style={{background:C.bgCard,border:`1px solid ${C.border}`,borderRadius:11,padding:"12px 14px",borderTop:`2px solid ${period.color}`}}>
-                                <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:10}}>
-                                  <span style={{fontSize:13}}>{period.icon}</span>
-                                  <span style={{fontSize:11,fontWeight:700,color:period.color}}>{period.label}</span>
-                                  {items.length>0&&<span style={{fontSize:9,background:`${period.color}18`,color:period.color,padding:"1px 6px",borderRadius:8,fontWeight:700,marginLeft:"auto"}}>{items.length}</span>}
-                                </div>
+                    <div style={{display:"flex",flexDirection:"column",gap:2}}>
+                      {periods.map(period=>{
+                        const items=todayAll.filter(i=>i.startHour>=period.from&&i.startHour<period.to);
+                        const isOpen=openAccordion===period.id;
+                        const isPast=now.getHours()>=period.to;
+                        const isCurrent=now.getHours()>=period.from&&now.getHours()<period.to;
+
+                        return(
+                          <div key={period.id} style={{borderRadius:12,overflow:"hidden",marginBottom:4}}>
+                            {/* Accordion header */}
+                            <button onClick={()=>setOpenAccordion(isOpen?null:period.id)} style={{
+                              width:"100%",display:"flex",alignItems:"center",gap:10,
+                              padding:"14px 18px",background:isOpen?C.bgCard:C.bgSurface,
+                              border:"none",cursor:"pointer",textAlign:"left",
+                              borderBottom:isOpen?`1px solid ${C.border}`:"none",
+                              transition:"background 0.15s",
+                            }}>
+                              <span style={{fontSize:16,opacity:isPast?0.4:1}}>{period.icon}</span>
+                              <span style={{fontSize:13,fontWeight:700,color:isPast?C.textMuted:C.text,flex:1}}>{period.label}</span>
+                              {isCurrent&&<span style={{fontSize:9,background:`${C.cyan}20`,color:C.cyan,padding:"2px 8px",borderRadius:10,fontWeight:700,letterSpacing:0.5}}>NOW</span>}
+                              <span style={{fontSize:11,color:C.textMuted,marginRight:6}}>{items.length>0?`${items.length} item${items.length>1?"s":""}`:"Clear"}</span>
+                              <span style={{fontSize:10,color:C.textFaint,transition:"transform 0.2s",display:"inline-block",transform:isOpen?"rotate(180deg)":"rotate(0deg)"}}>▼</span>
+                            </button>
+
+                            {/* Accordion body */}
+                            {isOpen&&(
+                              <div style={{background:C.bgCard,padding:"8px 0 4px"}}>
                                 {items.length===0?(
-                                  <div style={{fontSize:10,color:C.textFaint,fontStyle:"italic"}}>Clear</div>
-                                ):items.map(item=>(
-                                  <div key={item.id} onClick={()=>setSelected({type:item._type==="task"?"task":"event",item})}
-                                    style={{display:"flex",gap:6,alignItems:"flex-start",marginBottom:7,paddingBottom:7,borderBottom:`1px solid ${C.borderLight}`,cursor:"pointer"}}
-                                    onMouseEnter={e=>e.currentTarget.style.opacity="0.75"}
-                                    onMouseLeave={e=>e.currentTarget.style.opacity="1"}>
-                                    {item._type==="reminder"
-                                      ?<span style={{fontSize:13,flexShrink:0}}>🔔</span>
-                                      :<div style={{width:6,height:6,borderRadius:"50%",background:item._color,marginTop:3,flexShrink:0}}/>
-                                    }
-                                    <div style={{flex:1,minWidth:0}}>
-                                      <div style={{fontSize:11,fontWeight:600,color:item._type==="reminder"?C.medium:C.text,lineHeight:1.3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.title}</div>
-                                      <div style={{fontSize:9,color:C.textMuted,marginTop:1}}>
-                                        {fmtT(item.startHour,item.startMin)}
-                                        {item._type==="reminder"?" · Reminder":item.duration?` · ${fmtD(item.duration)}`:""}
+                                  <div style={{padding:"16px 18px",fontSize:12,color:C.textFaint,fontStyle:"italic"}}>Nothing scheduled — enjoy the breathing room.</div>
+                                ):items.map((item,idx)=>{
+                                  const isTask=item._type==="task"||item._type==="recurring";
+                                  const isReminder=item._type==="reminder";
+                                  const color=item._color||C.cyan;
+                                  const isItemPast=now.getHours()>item.startHour||(now.getHours()===item.startHour&&now.getMinutes()>item.startMin);
+                                  return(
+                                    <div key={item.id}
+                                      onClick={()=>setSelected({type:isTask?"task":"event",item})}
+                                      style={{
+                                        display:"flex",alignItems:"center",gap:14,
+                                        padding:"12px 18px",cursor:"pointer",
+                                        borderBottom:idx<items.length-1?`1px solid ${C.borderLight}`:"none",
+                                        opacity:isItemPast&&item.done?0.4:1,
+                                        transition:"background 0.1s",
+                                      }}
+                                      onMouseEnter={e=>e.currentTarget.style.background=C.bgSurface}
+                                      onMouseLeave={e=>e.currentTarget.style.background="transparent"}
+                                    >
+                                      {/* Time */}
+                                      <div style={{width:52,flexShrink:0,textAlign:"right"}}>
+                                        <div style={{fontSize:11,fontWeight:600,color:isItemPast?C.textFaint:C.textMuted}}>{fmtT(item.startHour,item.startMin)}</div>
+                                        {item.duration>0&&<div style={{fontSize:9,color:C.textFaint,marginTop:1}}>{fmtD(item.duration)}</div>}
                                       </div>
+
+                                      {/* Left border accent */}
+                                      <div style={{width:3,height:36,borderRadius:2,background:isReminder?C.medium:color,flexShrink:0,opacity:item.done?0.3:1}}/>
+
+                                      {/* Content */}
+                                      <div style={{flex:1,minWidth:0}}>
+                                        <div style={{display:"flex",alignItems:"center",gap:6}}>
+                                          {isReminder&&<span style={{fontSize:12}}>🔔</span>}
+                                          <div style={{fontSize:13,fontWeight:item.done?400:600,color:item.done?C.textFaint:C.text,textDecoration:item.done?"line-through":"none",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.title}</div>
+                                        </div>
+                                        <div style={{fontSize:10,color:C.textFaint,marginTop:2}}>
+                                          {isTask&&item.pillar?PILLARS[item.pillar]?.label:""}
+                                          {item.attendees?` · ${item.attendees}`:""}
+                                          {isReminder?" · Reminder":""}
+                                        </div>
+                                      </div>
+
+                                      {/* Actions */}
+                                      {isTask&&(
+                                        <div style={{display:"flex",gap:6,flexShrink:0}}>
+                                          <div onClick={e=>{e.stopPropagation();toggleDone(item.id);}} style={{width:18,height:18,borderRadius:5,border:`1.5px solid ${item.done?C.done:C.textFaint}`,background:item.done?C.done:"transparent",cursor:"pointer",display:"grid",placeItems:"center",flexShrink:0}}>
+                                            {item.done&&<span style={{color:C.bg,fontSize:10,fontWeight:900}}>✓</span>}
+                                          </div>
+                                        </div>
+                                      )}
+                                      {isReminder&&(
+                                        <button onClick={e=>{e.stopPropagation();setReminders(p=>p.filter(r=>r.id!==item.id));}} style={{background:"none",border:"none",cursor:"pointer",color:C.textFaint,fontSize:12,padding:"0 4px"}}>✕</button>
+                                      )}
                                     </div>
-                                  </div>
-                                ))}
+                                  );
+                                })}
                               </div>
-                            );
-                          })}
+                            )}
+                          </div>
+                        );
+                      })}
+
+                      {/* Unscheduled urgent — shown only in day view */}
+                      {unscheduled.filter(t=>t.priority==="High").length>0&&(
+                        <div style={{marginTop:20,padding:"16px 18px",background:C.bgCard,borderRadius:12,borderLeft:`3px solid ${C.high}`}}>
+                          <div style={{fontSize:11,fontWeight:700,color:C.high,marginBottom:12,textTransform:"uppercase",letterSpacing:0.5}}>Unscheduled — needs a time slot</div>
+                          {unscheduled.filter(t=>t.priority==="High").map(task=>(
+                            <div key={task.id} onClick={()=>setSelected({type:"task",item:task})}
+                              style={{display:"flex",alignItems:"center",gap:12,padding:"8px 0",borderBottom:`1px solid ${C.borderLight}`,cursor:"pointer"}}
+                              onMouseEnter={e=>e.currentTarget.style.opacity="0.7"}
+                              onMouseLeave={e=>e.currentTarget.style.opacity="1"}
+                            >
+                              <div style={{width:5,height:5,borderRadius:"50%",background:PILLARS[task.pillar]?.color||C.cyan,flexShrink:0}}/>
+                              <div style={{flex:1,fontSize:12,fontWeight:600,color:C.text}}>{task.title}</div>
+                              <div style={{fontSize:10,color:C.textMuted}}>{fmtD(task.duration)}</div>
+                            </div>
+                          ))}
                         </div>
                       )}
                     </div>
                   );
                 })()}
 
-                {/* Life balance strip */}
-                <div style={{background:C.bgCard,border:`1px solid ${C.border}`,borderRadius:12,padding:"16px"}}>
-                  <div style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",letterSpacing:0.5,marginBottom:14}}>Life Balance This Week</div>
-                  <div style={{display:"flex",gap:0,height:8,borderRadius:4,overflow:"hidden",marginBottom:10}}>
+                {/* ── WEEK VIEW ── */}
+                {todayView==="week"&&(()=>{
+                  const today=new Date(); today.setHours(0,0,0,0);
+                  const days=Array.from({length:7},(_,i)=>{
+                    const d=new Date(today); d.setDate(today.getDate()+i);
+                    return {offset:i,date:d,label:i===0?"Today":i===1?"Tomorrow":d.toLocaleDateString("en-AU",{weekday:"short",day:"numeric"})};
+                  });
+                  return(
+                    <div style={{display:"flex",flexDirection:"column",gap:3}}>
+                      {days.map(day=>{
+                        const dayItems=[
+                          ...scheduledTasks.filter(t=>t.dayOffset===day.offset).map(t=>({...t,_color:PILLARS[t.pillar]?.color||C.cyan,_type:"task"})),
+                          ...visibleGcalEvents.filter(e=>e.dayOffset===day.offset).map(e=>({...e,_color:e.calType==="family"?PILLARS.family.color:C.cyan,_type:"event"})),
+                          ...recurringInstances.filter(r=>r.dayOffset===day.offset).map(r=>({...r,_color:PILLARS[r.pillar]?.color||C.cyan,_type:"recurring"})),
+                          ...reminders.filter(r=>r.dayOffset===day.offset).map(r=>({...r,_color:C.medium,_type:"reminder"})),
+                        ].sort((a,b)=>(a.startHour*60+a.startMin)-(b.startHour*60+b.startMin));
+                        const isToday=day.offset===0;
+                        return(
+                          <div key={day.offset} style={{background:isToday?C.bgCard:C.bgSurface,borderRadius:10,overflow:"hidden",border:isToday?`1px solid ${C.border}`:"none"}}>
+                            <div style={{display:"flex",alignItems:"center",gap:10,padding:"10px 16px",borderBottom:dayItems.length>0?`1px solid ${C.borderLight}`:"none"}}>
+                              <div style={{width:28,height:28,borderRadius:"50%",background:isToday?C.cyan:"transparent",display:"grid",placeItems:"center",flexShrink:0}}>
+                                <span style={{fontSize:12,fontWeight:800,color:isToday?"#000":C.textMuted}}>{day.date.getDate()}</span>
+                              </div>
+                              <span style={{fontSize:12,fontWeight:isToday?700:500,color:isToday?C.text:C.textMuted,flex:1}}>{day.label}</span>
+                              <span style={{fontSize:10,color:C.textFaint}}>{dayItems.length>0?`${dayItems.length} items`:""}</span>
+                            </div>
+                            {dayItems.map((item,idx)=>(
+                              <div key={item.id} onClick={()=>setSelected({type:item._type==="task"||item._type==="recurring"?"task":"event",item})}
+                                style={{display:"flex",alignItems:"center",gap:10,padding:"8px 16px",borderBottom:idx<dayItems.length-1?`1px solid ${C.borderLight}`:"none",cursor:"pointer"}}
+                                onMouseEnter={e=>e.currentTarget.style.background=C.bgHover}
+                                onMouseLeave={e=>e.currentTarget.style.background="transparent"}
+                              >
+                                <span style={{fontSize:10,color:C.textFaint,width:44,flexShrink:0,textAlign:"right"}}>{fmtT(item.startHour,item.startMin)}</span>
+                                <div style={{width:3,height:24,borderRadius:2,background:item._color,flexShrink:0}}/>
+                                <div style={{flex:1,minWidth:0}}>
+                                  <div style={{fontSize:11,fontWeight:600,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.title}</div>
+                                </div>
+                                <span style={{fontSize:9,color:C.textFaint}}>{fmtD(item.duration)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+
+                {/* Life balance strip — neutral language */}
+                <div style={{marginTop:32,paddingTop:24,borderTop:`1px solid ${C.border}`}}>
+                  <div style={{fontSize:11,fontWeight:600,color:C.textMuted,marginBottom:14,textTransform:"uppercase",letterSpacing:0.5}}>Life Balance This Week</div>
+                  <div style={{height:4,borderRadius:2,overflow:"hidden",display:"flex",marginBottom:12}}>
                     {Object.entries(PILLARS).filter(([pid])=>pid!=="parking").map(([pid,meta])=>{
                       const pct=pillarPct(pid);
                       return pct>0?<div key={pid} style={{flex:pct,background:meta.color,transition:"flex 0.6s"}} title={`${meta.label}: ${pct}%`}/>:null;
                     })}
                   </div>
-                  <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
-                    {Object.entries(PILLARS).filter(([pid])=>pid!=="parking").map(([pid,meta])=>(
-                      <div key={pid} style={{display:"flex",alignItems:"center",gap:4}}>
-                        <div style={{width:6,height:6,borderRadius:"50%",background:meta.color}}/>
-                        <span style={{fontSize:9,color:C.textMuted}}>{meta.label} {pillarPct(pid)}%</span>
-                      </div>
-                    ))}
-                  </div>
-                  {warnings.length>0&&(
-                    <div style={{marginTop:12,padding:"8px 10px",background:`${C.medium}10`,border:`1px solid ${C.medium}30`,borderRadius:7}}>
-                      {warnings.map(w=>(
-                        <div key={w.pid} style={{fontSize:11,color:C.medium,display:"flex",alignItems:"center",gap:6}}>
-                          <span>{w.meta.icon}</span>
-                          <span><strong>{w.meta.label}</strong> has received less than 5% of your time this week.</span>
+                  <div style={{display:"flex",flexWrap:"wrap",gap:10}}>
+                    {Object.entries(PILLARS).filter(([pid])=>pid!=="parking").map(([pid,meta])=>{
+                      const pct=pillarPct(pid);
+                      const isQuiet=pct<5&&tasks.filter(t=>t.pillar===pid&&!t.done).length>0;
+                      return(
+                        <div key={pid} style={{display:"flex",alignItems:"center",gap:5}}>
+                          <div style={{width:6,height:6,borderRadius:"50%",background:meta.color}}/>
+                          <span style={{fontSize:10,color:isQuiet?C.textMuted:C.textFaint}}>{meta.label} {pct}%{isQuiet?" ·":""}</span>
+                          {isQuiet&&<span style={{fontSize:10,color:C.textMuted,fontStyle:"italic"}}>quiet this week</span>}
                         </div>
-                      ))}
-                    </div>
-                  )}
+                      );
+                    })}
+                  </div>
                 </div>
+
               </div>
             </div>
           )}
 
-          {/* ══ TODAY VIEW ═══════════════════════════════════════════════════ */}
-          {screen==="today"&&(
-            <div style={{flex:1,overflowY:"auto",padding:"20px 28px"}}>
-              <div style={{maxWidth:760,margin:"0 auto"}}>
-                <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:20}}>
-                  <h2 style={{margin:0,fontSize:20,fontWeight:800,letterSpacing:-0.5}}>{new Date().toLocaleDateString("en-AU",{weekday:"long",day:"numeric",month:"long"})}</h2>
-                  <button onClick={checkIn} style={{marginLeft:"auto",...btn(`${C.cyan}18`,C.cyan,C.cyanDim),fontSize:10}}>✦ Check In with Compass</button>
-                  <div style={{display:"flex",gap:6}}>
-                    <button onClick={resyncToday} style={{...btn(C.bgSurface,C.textMuted,C.border),fontSize:10}}>↻ Re-sync Today</button>
-                    <button onClick={()=>setEveningPlanModal(true)} style={{...btn(`${C.cyan}18`,C.cyan,C.cyanDim),fontSize:10}}>{isEvening||isMonday?isMonday?"✦ Plan Week":"✦ Plan Tomorrow":"✦ Plan Ahead"}</button>
-                    {unscheduled.length>0&&<button onClick={autoSchedule} disabled={scheduling} style={{...btn(`${C.cyan}14`,C.cyan,C.cyanDim),fontSize:10}}>{scheduling?"⟳":"✦ Schedule"}</button>}
-                  </div>
-                </div>
-
-                {/* Hourly timeline */}
-                <div style={{position:"relative"}}>
-                  {HOURS.filter(h=>h>=6&&h<=22).map(h=>{
-                    const items=todayAll.filter(e=>e.startHour===h);
-                    const now=new Date();
-                    const isPast=h<now.getHours();
-                    const isCurrent=h===now.getHours();
-                    const energy=energyProfile[h]||5;
-                    return(
-                      <div key={h} style={{display:"flex",gap:10,marginBottom:3}}>
-                        {/* Time label fades when past — tasks do NOT */}
-                        <div style={{width:52,flexShrink:0,textAlign:"right",paddingTop:9,display:"flex",flexDirection:"column",alignItems:"flex-end",gap:2,opacity:isPast?0.35:1}}>
-                          <span style={{fontSize:9,color:isCurrent?C.cyan:C.textFaint,fontWeight:isCurrent?700:400}}>{fmtT(h,0)}</span>
-                          <EnergyDot level={energy}/>
-                        </div>
-                        <div style={{flex:1,borderLeft:`1px solid ${isCurrent?C.cyan:C.border}`,paddingLeft:10,paddingTop:4,minHeight:36}}>
-                          {items.map(item=>(
-                            <div key={item.id} onClick={()=>setSelected({type:item._type==="task"?"task":"event",item})}
-                              style={{
-                                background:item._type==="reminder"?"transparent":item.done?`${C.bgSurface}`:`${item._color}14`,
-                                border:item._type==="reminder"?`1px dashed ${item._color}40`:item.done?`1px solid ${C.border}`:`1px solid ${item._color}30`,
-                                borderLeft:`3px solid ${item.done?"#2a3a52":item._color}`,
-                                borderRadius:7,
-                                padding:item._type==="reminder"?"4px 11px":"7px 11px",
-                                marginBottom:4,cursor:"pointer",display:"flex",alignItems:"center",gap:8,
-                                // Only fade if explicitly marked done — NOT because time passed
-                                opacity:item.done?0.45:1,
-                              }}>
-                              <div style={{flex:1}}>
-                                <div style={{display:"flex",alignItems:"center",gap:5}}>
-                                  {item._type==="reminder"&&<span style={{fontSize:13}}>🔔</span>}
-                                  <div style={{fontSize:12,fontWeight:700,color:item._type==="reminder"?C.medium:C.text}}>{item.title}</div>
-                                </div>
-                                <div style={{fontSize:9,color:C.textMuted,marginTop:2}}>
-                                  {fmtT(item.startHour,item.startMin)}
-                                  {item._type==="task"&&item.duration?` · ${fmtD(item.duration)}`:""}
-                                  {item._type==="task"?` · ${PILLARS[item.pillar]?.label}`:""}
-                                  {item._type==="event"?" · Meeting":""}
-                                  {item._type==="reminder"?" · Reminder — no time blocked":""}
-                                  {item._type==="recurring"?` · ${PILLARS[item.pillar]?.label}`:""}
-                                  {item.attendees?` · ${item.attendees}`:""}
-                                  {item._type==="reminder"&&item.notes?` · ${item.notes}`:""}
-                                </div>
-                              </div>
-                              {item._type==="task"&&(
-                                <div style={{display:"flex",gap:5}}>
-                                  <div onClick={e=>{e.stopPropagation();toggleDone(item.id);}} style={{width:15,height:15,borderRadius:4,border:`1.5px solid ${item.done?C.done:C.textFaint}`,background:item.done?C.done:"transparent",cursor:"pointer",display:"grid",placeItems:"center"}}>
-                                    {item.done&&<span style={{color:C.bg,fontSize:8,fontWeight:900}}>✓</span>}
-                                  </div>
-                                  <button onClick={e=>{e.stopPropagation();postponeTask(item.id);}} style={{background:"none",border:`1px solid ${C.border}`,borderRadius:4,color:C.textFaint,fontSize:9,cursor:"pointer",padding:"0 5px"}}>↩</button>
-                                </div>
-                              )}
-                              {item._type==="reminder"&&(
-                                <button onClick={e=>{e.stopPropagation();setReminders(p=>p.filter(r=>r.id!==item.id));}} style={{background:"none",border:`1px solid ${C.border}`,borderRadius:4,color:C.textFaint,fontSize:9,cursor:"pointer",padding:"0 5px"}}>✕</button>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {/* Pinned next action */}
-                {unscheduled.filter(t=>t.priority==="High").length>0&&(
-                  <div style={{position:"sticky",bottom:16,marginTop:16,background:`${C.bgCard}ee`,backdropFilter:"blur(10px)",border:`1px solid ${C.cyan}40`,borderRadius:10,padding:"12px 16px",display:"flex",alignItems:"center",gap:12}}>
-                    <div style={{flex:1}}>
-                      <div style={{fontSize:10,color:C.cyan,fontWeight:700,marginBottom:3}}>NEXT UNSCHEDULED PRIORITY</div>
-                      <div style={{fontSize:13,fontWeight:700,color:C.text}}>{unscheduled.filter(t=>t.priority==="High")[0]?.title}</div>
-                    </div>
-                    <button onClick={autoSchedule} style={{...btn(`${C.cyan}`,C.bg,C.cyan),fontSize:11}}>✦ Schedule Now</button>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* ══ LIFE MAP ═════════════════════════════════════════════════════ */}
           {screen==="lifemap"&&(
             <div style={{flex:1,overflowY:"auto",padding:"20px 24px"}}>
               <div style={{maxWidth:900,margin:"0 auto"}}>
@@ -1755,8 +1808,8 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
                 <span style={{fontSize:10,color:C.textFaint,marginLeft:4}}>Click any slot to block time</span>
                 <div style={{marginLeft:"auto",display:"flex",gap:7}}>
                   {hiddenEvents.length>0&&(
-                    <button onClick={()=>setShowHiddenModal(true)} style={{...btn(`${C.medium}14`,C.medium,C.medium),fontSize:10}}>
-                      👁 Hidden ({hiddenEvents.length})
+                    <button onClick={()=>setShowIgnoredModal(true)} style={{...btn(`${C.medium}14`,C.medium,C.medium),fontSize:10}}>
+                      👁 Ignored ({hiddenEvents.length})
                     </button>
                   )}
                   <button onClick={()=>{setNewItem({title:"",dayOffset:0,startHour:9,startMin:0,duration:60});setAddModal("event");}} style={{...btn(`${C.cyan}14`,C.cyan,C.cyanDim),fontSize:10}}>+ Meeting</button>
@@ -1866,9 +1919,14 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
                           const color=item._isTask
                             ?(PILLARS[item.pillar]?.color||C.cyan)
                             :item.calType==="family"?PILLARS.family.color
-                            :item.calType==="block"?"#444":C.cyan;
+                            :item.calType==="block"?"#556":C.cyan;
+                        const blockType=item.calType==="family"||item.calType==="work"?"locked"
+                            :item._isRecurring?"recurring"
+                            :item.calType==="block"?"block"
+                            :item._isTask?"scheduled"
+                            :"locked";
                           return(
-                            <CalBlock key={item.id} item={item} color={color} col={item.col} cols={item.cols} isTask={item._isTask}
+                            <CalBlock key={item.id} item={item} color={color} col={item.col} cols={item.cols} isTask={item._isTask} blockType={blockType}
                               onClick={()=>{
                                 if(item._isRecurring){
                                   const rt=recurringTasks.find(r=>r.id===item.recurringId);
@@ -1883,8 +1941,8 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
                           const now=new Date(); const top=px(now.getHours(),now.getMinutes());
                           return top>0&&top<HOURS.length*HOUR_H?(
                             <div style={{position:"absolute",top,left:0,right:0,zIndex:10,display:"flex",alignItems:"center",pointerEvents:"none"}}>
-                              <div style={{width:7,height:7,borderRadius:"50%",background:C.cyan,marginLeft:-3,boxShadow:`0 0 6px ${C.cyan}`}}/>
-                              <div style={{flex:1,height:1.5,background:C.cyan,opacity:0.7}}/>
+                              <div style={{width:9,height:9,borderRadius:"50%",background:C.cyan,marginLeft:-4,boxShadow:`0 0 10px ${C.cyan}`,animation:"nowPulse 2s ease-in-out infinite"}}/>
+                              <div style={{flex:1,height:2,background:C.cyan,opacity:0.8}}/>
                             </div>
                           ):null;
                         })()}
@@ -2060,7 +2118,7 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
                   {/* Hide — for Google Calendar events only */}
                   {!e.id?.startsWith("manual-")&&!e.id?.startsWith("block-")&&(
                     <button onClick={()=>{hideEvent(e.id);setSelected(null);}} style={{...btn(`${C.medium}14`,C.medium,C.medium),fontSize:11}}>
-                      👁 Hide from Sync'n
+                      👁 Ignore in Sync'n
                     </button>
                   )}
                   {/* Delete — available for ALL events */}
@@ -2072,7 +2130,7 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
                 </div>
                 {!e.id?.startsWith("manual-")&&!e.id?.startsWith("block-")&&(
                   <div style={{fontSize:10,color:C.textFaint,marginTop:6}}>
-                    Hide = stays in Google Calendar, invisible in Sync'n. Delete = removed from Sync'n only (still in Google Calendar).
+                    Ignore = stays in Google Calendar, invisible in Sync'n. Delete = removed from Sync'n only (still in Google Calendar).
                   </div>
                 )}
               </>);
@@ -2817,19 +2875,19 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
       )}
 
       {/* ── HIDDEN EVENTS MANAGER ── */}
-      {showHiddenModal&&(
-        <div onClick={()=>setShowHiddenModal(false)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.65)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center"}}>
+      {showIgnoredModal&&(
+        <div onClick={()=>setShowIgnoredModal(false)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.65)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center"}}>
           <div onClick={e=>e.stopPropagation()} style={{background:C.bgCard,borderRadius:16,padding:24,width:500,maxWidth:"92vw",maxHeight:"65vh",overflow:"hidden",display:"flex",flexDirection:"column",boxShadow:`0 24px 60px rgba(0,0,0,0.7),0 0 0 1px ${C.border}`}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-              <h3 style={{margin:0,fontSize:15,fontWeight:800,color:C.text}}>Hidden Events</h3>
-              <button onClick={()=>setShowHiddenModal(false)} style={{background:"none",border:"none",cursor:"pointer",color:C.textFaint,fontSize:20}}>×</button>
+              <h3 style={{margin:0,fontSize:15,fontWeight:800,color:C.text}}>Ignored Events</h3>
+              <button onClick={()=>setShowIgnoredModal(false)} style={{background:"none",border:"none",cursor:"pointer",color:C.textFaint,fontSize:20}}>×</button>
             </div>
             <div style={{fontSize:11,color:C.textMuted,marginBottom:16}}>
               These events are hidden from Sync'n but still exist in Google Calendar. Your family can still see them.
             </div>
             <div style={{overflowY:"auto",flex:1}}>
               {hiddenEvents.length===0?(
-                <div style={{fontSize:12,color:C.textFaint,padding:"20px 0",textAlign:"center"}}>No hidden events. Tap "Hide from Sync'n" on any calendar event to hide it.</div>
+                <div style={{fontSize:12,color:C.textFaint,padding:"20px 0",textAlign:"center"}}>No hidden events. Tap "Ignore in Sync'n" on any calendar event to hide it.</div>
               ):gcalEvents.filter(e=>hiddenEvents.includes(e.id)).map(e=>(
                 <div key={e.id} style={{background:C.bgSurface,border:`1px solid ${C.border}`,borderRadius:8,padding:"10px 14px",marginBottom:6,display:"flex",alignItems:"center",gap:10}}>
                   <div style={{flex:1}}>
@@ -2849,14 +2907,14 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
               )}
             </div>
             {hiddenEvents.length>0&&(
-              <button onClick={()=>{setHiddenEvents([]);localStorage.setItem("syncn_hidden_events","[]");}} style={{marginTop:12,...btn(C.bgSurface,C.high,C.high),fontSize:11,alignSelf:"flex-start"}}>Clear All Hidden</button>
+              <button onClick={()=>{setHiddenEvents([]);localStorage.setItem("syncn_hidden_events","[]");}} style={{marginTop:12,...btn(C.bgSurface,C.high,C.high),fontSize:11,alignSelf:"flex-start"}}>Clear All Ignored</button>
             )}
           </div>
         </div>
       )}
 
       <style>{`
-        @keyframes blink{0%,100%{opacity:.15}50%{opacity:1}}
+        @keyframes blink{0%,100%{opacity:.15}50%{opacity:1}}@keyframes nowPulse{0%,100%{box-shadow:0 0 8px #00b4d8}50%{box-shadow:0 0 16px #00b4d8,0 0 32px #00b4d840}}
         *{box-sizing:border-box}
         ::-webkit-scrollbar{width:4px;height:4px}
         ::-webkit-scrollbar-track{background:transparent}
