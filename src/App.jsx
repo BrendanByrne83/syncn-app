@@ -685,22 +685,45 @@ Existing blocks:${JSON.stringify([...visibleGcalEvents.filter(e=>e.dayOffset===0
       const res=await fetch("/.netlify/functions/sync-calendar?range=month");
       if(!res.ok) throw new Error("Sync failed");
       const raw=await res.json();
-      const today=new Date(); today.setHours(0,0,0,0);
-      const weekMon=getWeekStart(0);
+
+      // Get today at midnight LOCAL time for offset calculation
+      const now=new Date();
+      const todayMidnight=new Date(now.getFullYear(),now.getMonth(),now.getDate(),0,0,0,0);
+
       const events=raw.map(e=>{
-        // Use rawStart date if available for accurate day offset
-        if(e.rawStart){
-          const parts=e.rawStart.match(/([0-9]{4})-([0-9]{2})-([0-9]{2})/);
-          if(parts){
-            const evDate=new Date(+parts[1],+parts[2]-1,+parts[3]);
-            return {...e,dayOffset:Math.round((evDate-today)/(864e5))};
+        // rawStart comes from the Netlify function as the original ISO string
+        // e.g. "2026-06-12T10:30:00+10:00" or "2026-06-12T00:30:00Z"
+        // We need the LOCAL date (AEST +10) — extract year/month/day directly from the string
+        const raw = e.rawStart || e.rawEnd || "";
+        let year, month, day;
+
+        if(raw){
+          // Always take the date portion directly from the string before any T
+          // This avoids UTC conversion entirely
+          const datePart = raw.split("T")[0]; // "2026-06-12"
+          const parts = datePart.split("-");
+          if(parts.length===3){
+            year = parseInt(parts[0]);
+            month = parseInt(parts[1]) - 1; // 0-indexed
+            day = parseInt(parts[2]);
           }
         }
-        const ed=new Date(weekMon); ed.setDate(weekMon.getDate()+(e.dayIdx||0));
-        return {...e,dayOffset:Math.round((ed-today)/(864e5))};
+
+        if(year!==undefined){
+          const evDate = new Date(year, month, day, 0, 0, 0, 0);
+          const offset = Math.round((evDate - todayMidnight) / 864e5);
+          return {...e, dayOffset: offset};
+        }
+
+        // Absolute fallback — shouldn't reach here with proper rawStart
+        return {...e, dayOffset: 0};
       });
+
       setGcalEvents(events);
-    }catch(e){ setCalError("Sync failed."); }
+    }catch(e){
+      console.error("Sync error:", e);
+      setCalError("Sync failed. Check connection.");
+    }
     setCalLoading(false);
   },[]);
 
