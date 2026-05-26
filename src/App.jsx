@@ -310,21 +310,11 @@ function renderInline(text) {
 }
 
 // ─── DAY PICKER COMPONENT ────────────────────────────────────────────────────
-// Shows actual calendar days (Mon 26, Tue 27 etc) as tappable chips
-function DayPicker({value, onChange, multi=false, label="Day"}) {
+function DayPicker({value, onChange, multi=false, label="Day", showDateInput=false}) {
   const today = new Date(); today.setHours(0,0,0,0);
-  const days = Array.from({length:14},(_,i)=>{
-    const d = new Date(today); d.setDate(today.getDate()+i);
-    return {
-      offset: i,
-      label: i===0?"Today":i===1?"Tomorrow":d.toLocaleDateString("en-AU",{weekday:"short",day:"numeric"}),
-      short: d.toLocaleDateString("en-AU",{weekday:"short"}),
-      date: d.toLocaleDateString("en-AU",{day:"numeric"}),
-    };
-  });
 
   if (multi) {
-    // For recurring — show Mon-Sun as toggleable chips
+    // Full Mon-Sun multi-select for recurring tasks
     const DAYS = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
     return (
       <div>
@@ -333,41 +323,70 @@ function DayPicker({value, onChange, multi=false, label="Day"}) {
           {DAYS.map((d,i)=>{
             const active = Array.isArray(value) && value.includes(i);
             return(
-              <button key={i} onClick={()=>{
-                const current = Array.isArray(value)?value:[];
-                onChange(active?current.filter(x=>x!==i):[...current,i].sort());
+              <button key={i} type="button" onClick={()=>{
+                const current = Array.isArray(value)?[...value]:[];
+                const next = active ? current.filter(x=>x!==i) : [...current,i].sort((a,b)=>a-b);
+                onChange(next);
               }} style={{
-                padding:"5px 10px",borderRadius:6,border:`1px solid ${active?"#00b4d8":"#1a2540"}`,
-                background:active?"#00b4d818":"transparent",color:active?"#00b4d8":"#6b7fa3",
-                fontSize:11,fontWeight:active?700:400,cursor:"pointer",transition:"all 0.12s"
+                padding:"6px 11px",borderRadius:6,border:`1.5px solid ${active?"#00b4d8":"#1a2540"}`,
+                background:active?"#00b4d822":"transparent",color:active?"#00b4d8":"#6b7fa3",
+                fontSize:11,fontWeight:active?800:400,cursor:"pointer",transition:"all 0.12s",
+                boxShadow:active?"0 0 6px #00b4d830":"none",
               }}>{d}</button>
             );
           })}
         </div>
+        <div style={{fontSize:10,color:"#3a4a6a",marginTop:5}}>Tap to toggle. Multiple days supported.</div>
       </div>
     );
   }
 
+  // Single day — show upcoming 14 days as chips + optional date input
+  const days = Array.from({length:14},(_,i)=>{
+    const d = new Date(today); d.setDate(today.getDate()+i);
+    return {
+      offset: i,
+      short: d.toLocaleDateString("en-AU",{weekday:"short"}),
+      date: d.getDate(),
+      full: d,
+    };
+  });
+
   return (
     <div>
       <div style={{fontSize:11,color:"#6b7fa3",marginBottom:6}}>{label}</div>
-      <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+      <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:showDateInput?8:0}}>
         {days.map(d=>{
           const active = value===d.offset;
           return(
-            <button key={d.offset} onClick={()=>onChange(d.offset)} style={{
-              padding:"5px 10px",borderRadius:6,border:`1px solid ${active?"#00b4d8":"#1a2540"}`,
-              background:active?"#00b4d818":"transparent",
+            <button key={d.offset} type="button" onClick={()=>onChange(d.offset)} style={{
+              padding:"5px 8px",borderRadius:6,
+              border:`1.5px solid ${active?"#00b4d8":"#1a2540"}`,
+              background:active?"#00b4d822":"transparent",
               color:active?"#00b4d8":"#6b7fa3",
-              fontSize:11,fontWeight:active?700:400,cursor:"pointer",transition:"all 0.12s",
-              display:"flex",flexDirection:"column",alignItems:"center",gap:1,minWidth:44
+              fontSize:10,fontWeight:active?800:400,cursor:"pointer",transition:"all 0.12s",
+              display:"flex",flexDirection:"column",alignItems:"center",gap:1,minWidth:40,
+              boxShadow:active?"0 0 6px #00b4d830":"none",
             }}>
-              <span style={{fontSize:9,opacity:0.7}}>{d.short}</span>
-              <span style={{fontWeight:active?800:400}}>{d.date||d.label}</span>
+              <span style={{fontSize:8,opacity:0.7}}>{d.short}</span>
+              <span>{d.date}</span>
             </button>
           );
         })}
       </div>
+      {showDateInput&&(
+        <div style={{display:"flex",alignItems:"center",gap:8,marginTop:4}}>
+          <span style={{fontSize:10,color:"#6b7fa3",whiteSpace:"nowrap"}}>Or pick a date:</span>
+          <input type="date" style={{fontSize:11,border:"1px solid #1a2540",borderRadius:6,padding:"5px 8px",background:"#0d1220",color:"#f0f4ff",outline:"none"}}
+            onChange={e=>{
+              if(!e.target.value) return;
+              const picked=new Date(e.target.value); picked.setHours(0,0,0,0);
+              const todayD=new Date(); todayD.setHours(0,0,0,0);
+              const off=Math.round((picked-todayD)/(864e5));
+              onChange(off);
+            }}/>
+        </div>
+      )}
     </div>
   );
 }
@@ -953,7 +972,11 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
             </button>
           )}
           <button
-            onClick={()=>{setAddType("task");setNewItem({pillar:"film",sub:"",title:"",priority:"High",duration:60,status:"active",notes:"",deadline:""});setAddModal(true);}}
+            onClick={()=>{
+              setAddType("task");
+              setNewItem({pillar:"film",sub:"",title:"",priority:"High",duration:60,status:"active",notes:"",deadline:"",_recurring:"never",_scheduleNow:false});
+              setAddModal(true);
+            }}
             style={{background:`linear-gradient(135deg,${C.cyan},${C.cyanDim})`,color:"#000",border:"none",borderRadius:7,padding:"5px 18px",fontSize:12,fontWeight:800,cursor:"pointer"}}>
             + Add
           </button>
@@ -984,7 +1007,11 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
                 const subs=allSubs(pid);
                 return(
                   <div key={pid}>
-                    <button onClick={()=>{setSelectedPillar(isActive?null:pid);setSelectedSub(null);}} style={{
+                    <button onClick={()=>{
+                      setSelectedPillar(isActive?null:pid);
+                      setSelectedSub(null);
+                      if(!isActive) setScreen("lifemap");
+                    }} style={{
                       width:"100%",textAlign:"left",padding:"5px 8px",border:"none",cursor:"pointer",
                       background:isActive?`${meta.color}14`:"transparent",
                       display:"flex",alignItems:"center",gap:6,borderRadius:6,
@@ -995,7 +1022,7 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
                       {ct>0&&<span style={{fontSize:8,background:C.bgSurface,borderRadius:8,padding:"1px 5px",color:C.textFaint,fontWeight:700}}>{ct}</span>}
                     </button>
                     {isActive&&subs.map(sub=>(
-                      <button key={sub} onClick={()=>setSelectedSub(selectedSub===sub?null:sub)} style={{
+                      <button key={sub} onClick={()=>{setSelectedSub(selectedSub===sub?null:sub);setScreen("lifemap");}} style={{
                         width:"100%",textAlign:"left",padding:"3px 10px 3px 26px",border:"none",cursor:"pointer",
                         background:selectedSub===sub?`${meta.color}10`:"transparent",
                         fontSize:10,color:selectedSub===sub?meta.color:C.textFaint,fontWeight:selectedSub===sub?600:400,borderRadius:4,marginBottom:1,
@@ -1023,7 +1050,12 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
                   <div key={pid} style={{position:"relative",width:"100%",display:"flex",justifyContent:"center"}}
                     onMouseEnter={e=>{const tip=e.currentTarget.querySelector(".tip");if(tip)tip.style.opacity="1";}}
                     onMouseLeave={e=>{const tip=e.currentTarget.querySelector(".tip");if(tip)tip.style.opacity="0";}}>
-                    <button onClick={()=>{setSelectedPillar(isActive?null:pid);setSelectedSub(null);setSidebarMode("expanded");}} style={{
+                    <button onClick={()=>{
+                      setSelectedPillar(isActive?null:pid);
+                      setSelectedSub(null);
+                      setSidebarMode("expanded");
+                      if(!isActive) setScreen("lifemap");
+                    }} style={{
                       width:28,height:28,borderRadius:"50%",border:"none",cursor:"pointer",
                       background:isActive?meta.color:`${meta.color}40`,
                       boxShadow:isActive?`0 0 8px ${meta.color}60`:"none",
@@ -1379,7 +1411,7 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
               </div>
 
               {/* Day headers */}
-              <div style={{display:"grid",gridTemplateColumns:"44px repeat(7,1fr)",background:C.bgCard,borderBottom:`1px solid ${C.border}`,flexShrink:0}}>
+              <div style={{display:"grid",gridTemplateColumns:"52px repeat(7,1fr)",background:C.bgCard,borderBottom:`1px solid ${C.border}`,flexShrink:0}}>
                 <div/>
                 {dayDates.map((date,i)=>{
                   const isToday=todayCol===i;
@@ -1401,11 +1433,11 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
 
               {/* Grid */}
               <div ref={calScrollRef} style={{flex:1,overflowY:"auto"}}>
-                <div style={{display:"grid",gridTemplateColumns:"44px repeat(7,1fr)",height:HOURS.length*HOUR_H}}>
-                  <div style={{position:"relative"}}>
+                <div style={{display:"grid",gridTemplateColumns:"52px repeat(7,1fr)",height:HOURS.length*HOUR_H}}>
+                  <div style={{position:"relative",overflow:"hidden"}}>
                     {HOURS.map(h=>(
-                      <div key={h} style={{position:"absolute",top:px(h),right:5}}>
-                        <span style={{fontSize:8,color:C.textFaint}}>{fmtT(h,0)}</span>
+                      <div key={h} style={{position:"absolute",top:px(h)-7,left:0,right:3,textAlign:"right"}}>
+                        <span style={{fontSize:9,color:C.textMuted,fontWeight:600,whiteSpace:"nowrap",letterSpacing:-0.3}}>{fmtT(h,0)}</span>
                       </div>
                     ))}
                   </div>
@@ -1612,18 +1644,24 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
                 {e.attendees&&<div style={{fontSize:11,color:C.textMuted,marginBottom:10}}>👥 {e.attendees}</div>}
                 {e.htmlLink&&<a href={e.htmlLink} target="_blank" rel="noreferrer" style={{fontSize:11,color:C.cyan}}>Open in Google Calendar →</a>}
                 <div style={{display:"flex",gap:7,marginTop:12,flexWrap:"wrap"}}>
+                  {/* Hide — for Google Calendar events only */}
                   {!e.id?.startsWith("manual-")&&!e.id?.startsWith("block-")&&(
                     <button onClick={()=>{hideEvent(e.id);setSelected(null);}} style={{...btn(`${C.medium}14`,C.medium,C.medium),fontSize:11}}>
                       👁 Hide from Sync'n
                     </button>
                   )}
-                  {(e.id?.startsWith("manual-")||e.id?.startsWith("block-"))&&(
-                    <button onClick={()=>{setGcalEvents(p=>p.filter(x=>x.id!==e.id));setSelected(null);}} style={{...btn("none",C.high,C.high),fontSize:11}}>Delete</button>
-                  )}
+                  {/* Delete — available for ALL events */}
+                  <button onClick={()=>{
+                    setGcalEvents(p=>p.filter(x=>x.id!==e.id));
+                    setReminders(p=>p.filter(x=>x.id!==e.id));
+                    setSelected(null);
+                  }} style={{...btn("none",C.high,C.high),fontSize:11}}>🗑 Delete</button>
                 </div>
-                <div style={{fontSize:10,color:C.textFaint,marginTop:6}}>
-                  {!e.id?.startsWith("manual-")&&!e.id?.startsWith("block-")&&"Hiding removes it from your Sync'n view only. It stays in Google Calendar."}
-                </div>
+                {!e.id?.startsWith("manual-")&&!e.id?.startsWith("block-")&&(
+                  <div style={{fontSize:10,color:C.textFaint,marginTop:6}}>
+                    Hide = stays in Google Calendar, invisible in Sync'n. Delete = removed from Sync'n only (still in Google Calendar).
+                  </div>
+                )}
               </>);
             })()}
           </div>
@@ -1638,7 +1676,16 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
             {/* Type selector */}
             <div style={{display:"flex",gap:4,marginBottom:20,background:C.bg,borderRadius:10,padding:3}}>
               {[["task","Task","📋"],["meeting","Meeting","📅"],["reminder","Reminder","🔔"]].map(([t,l,ic])=>(
-                <button key={t} onClick={()=>{setAddType(t);setNewItem(prev=>({title:prev.title||""}));}} style={{
+                <button key={t} onClick={()=>{
+                  setAddType(t);
+                  setNewItem(prev=>({
+                    title:prev.title||"",
+                    // Reset type-specific fields but keep title
+                    ...(t==="task"?{pillar:"film",sub:"",priority:"High",duration:60,status:"active",notes:"",deadline:""}:{}),
+                    ...(t==="meeting"?{duration:60,notes:""}:{}),
+                    ...(t==="reminder"?{notes:""}:{}),
+                  }));
+                }} style={{
                   flex:1,padding:"7px 4px",borderRadius:8,border:"none",cursor:"pointer",
                   background:addType===t?C.bgSurface:"transparent",
                   color:addType===t?C.text:C.textMuted,
@@ -1701,7 +1748,7 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
                     Schedule manually now
                   </label>
                   {newItem._scheduleNow&&(<>
-                    <DayPicker value={newItem.dayOffset??0} onChange={v=>setNewItem(n=>({...n,dayOffset:v}))} label="Which day?"/>
+                    <DayPicker value={newItem.dayOffset??0} onChange={v=>setNewItem(n=>({...n,dayOffset:v}))} label="Which day?" showDateInput/>
                     <div style={{display:"flex",gap:8,alignItems:"center",marginTop:8}}>
                       <label style={{fontSize:11,color:C.textMuted,whiteSpace:"nowrap"}}>Time</label>
                       <input type="time" defaultValue="09:00" onChange={e=>{const[h,m]=e.target.value.split(":").map(Number);setNewItem(n=>({...n,startHour:h,startMin:m}));}} style={{...inp,flex:1}}/>
@@ -1716,7 +1763,7 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
             {addType==="meeting"&&(
               <div style={{display:"flex",flexDirection:"column",gap:10}}>
                 <input value={newItem.attendees||""} onChange={e=>setNewItem(n=>({...n,attendees:e.target.value}))} placeholder="Participants (names or emails)" style={{...inp}}/>
-                <DayPicker value={newItem.dayOffset??0} onChange={v=>setNewItem(n=>({...n,dayOffset:v}))} label="Day"/>
+                <DayPicker value={newItem.dayOffset??0} onChange={v=>setNewItem(n=>({...n,dayOffset:v}))} label="Day" showDateInput/>
                 <div style={{display:"flex",gap:8,alignItems:"center"}}>
                   <label style={{fontSize:11,color:C.textMuted,whiteSpace:"nowrap"}}>Time</label>
                   <input type="time" defaultValue="09:00" onChange={e=>{const[h,m]=e.target.value.split(":").map(Number);setNewItem(n=>({...n,startHour:h,startMin:m}));}} style={{...inp,flex:1}}/>
@@ -1740,7 +1787,7 @@ Keep it tight. Max 200 words. This is a briefing, not a pep talk.`;
             {/* REMINDER */}
             {addType==="reminder"&&(
               <div style={{display:"flex",flexDirection:"column",gap:10}}>
-                <DayPicker value={newItem.dayOffset??0} onChange={v=>setNewItem(n=>({...n,dayOffset:v}))} label="When?"/>
+                <DayPicker value={newItem.dayOffset??0} onChange={v=>setNewItem(n=>({...n,dayOffset:v}))} label="When?" showDateInput/>
                 <div style={{display:"flex",gap:8,alignItems:"center"}}>
                   <label style={{fontSize:11,color:C.textMuted,whiteSpace:"nowrap"}}>Time</label>
                   <input type="time" defaultValue="09:00" onChange={e=>{const[h,m]=e.target.value.split(":").map(Number);setNewItem(n=>({...n,startHour:h,startMin:m}));}} style={{...inp,flex:1}}/>
